@@ -1,6 +1,8 @@
 #include "installer_wizard.h"
 
+#ifdef UNLEASHED_RECOMP_HAS_NFD
 #include <nfd.h>
+#endif
 
 #include <apu/embedded_player.h>
 #include <install/installer.h>
@@ -9,6 +11,7 @@
 #include <hid/hid.h>
 #include <locale/locale.h>
 #include <patches/aspect_ratio_patches.h>
+#include <os/logger.h>
 #include <ui/imgui_utils.h>
 #include <ui/button_guide.h>
 #include <ui/message_window.h>
@@ -1083,6 +1086,7 @@ static void DrawProgressBar(float progressRatio)
     drawList->AddRectFilledMultiColor(sliderMin, sliderMax, sliderColor0, sliderColor0, sliderColor1, sliderColor1);
 }
 
+#ifdef UNLEASHED_RECOMP_HAS_NFD
 static bool ConvertPathSet(const nfdpathset_t *pathSet, std::list<std::filesystem::path> &filePaths)
 {
     nfdpathsetsize_t pathSetCount = 0;
@@ -1106,9 +1110,11 @@ static bool ConvertPathSet(const nfdpathset_t *pathSet, std::list<std::filesyste
 
     return true;
 }
+#endif
 
 static void PickerThreadProcess()
 {
+#ifdef UNLEASHED_RECOMP_HAS_NFD
     const nfdpathset_t *pathSet;
     nfdresult_t result = NFD_ERROR;
     if (g_currentPickerFolderMode)
@@ -1131,6 +1137,10 @@ static void PickerThreadProcess()
     }
 
     g_currentPickerResultsReady = true;
+#else
+    g_currentPickerErrorMessage = Localise("Installer_Message_FilePickerTutorial");
+    g_currentPickerResultsReady = true;
+#endif
 }
 
 static void PickerStart(bool folderMode) {
@@ -1846,10 +1856,15 @@ void InstallerWizard::Shutdown()
 
 bool InstallerWizard::Run(std::filesystem::path installPath, bool skipGame)
 {
+    os::logger::Log(fmt::format("InstallerWizard::Run start - installPath: {}, skipGame: {}", (const char*)installPath.u8string().c_str(), skipGame));
     g_installPath = installPath;
 
     EmbeddedPlayer::Init();
+    os::logger::Log("InstallerWizard::Run - EmbeddedPlayer::Init completed");
+#ifdef UNLEASHED_RECOMP_HAS_NFD
     NFD_Init();
+    os::logger::Log("InstallerWizard::Run - NFD_Init completed");
+#endif
 
     // Guarantee one controller is initialized. We'll rely on SDL's event loop to get the controller events.
     XAMINPUT_STATE inputState;
@@ -1868,19 +1883,44 @@ bool InstallerWizard::Run(std::filesystem::path installPath, bool skipGame)
 
     GameWindow::SetFullscreenCursorVisibility(true);
     s_isVisible = true;
+    os::logger::Log("InstallerWizard::Run - entering wizard loop");
+
+    bool firstFrame = true;
+    uint64_t installerFrameCounter = 0;
 
     while (s_isVisible)
     {
+        if (firstFrame)
+            os::logger::Log("InstallerWizard::Run - first frame: WaitOnSwapChain begin");
         Video::WaitOnSwapChain();
+        if (firstFrame)
+            os::logger::Log("InstallerWizard::Run - first frame: WaitOnSwapChain end");
         ProcessMusic();
+        if (firstFrame)
+            os::logger::Log("InstallerWizard::Run - first frame: ProcessMusic end");
         SDL_PumpEvents();
         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
         GameWindow::Update();
         Video::Present();
+        if (firstFrame)
+        {
+            os::logger::Log("InstallerWizard::Run - first frame: Present end");
+            firstFrame = false;
+        }
+
+        installerFrameCounter++;
+        if ((installerFrameCounter % 120) == 0)
+        {
+            os::logger::Log(fmt::format(
+                "InstallerWizard::Run heartbeat - frames: {}, page: {}, visible: {}, disappearing: {}",
+                installerFrameCounter, (int)g_currentPage, s_isVisible, g_isDisappearing));
+        }
     }
 
     GameWindow::SetFullscreenCursorVisibility(false);
+#ifdef UNLEASHED_RECOMP_HAS_NFD
     NFD_Quit();
+#endif
 
     InstallerWizard::Shutdown();
     EmbeddedPlayer::Shutdown();

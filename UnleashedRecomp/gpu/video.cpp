@@ -31,7 +31,12 @@
 #include <user/config.h>
 #include <sdl_listener.h>
 #include <xxHashMap.h>
+#include <os/logger.h>
 #include <os/process.h>
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 
 #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
 #include <magic_enum/magic_enum.hpp>
@@ -1572,15 +1577,25 @@ static void CreateImGuiBackend()
 
 static void CheckSwapChain()
 {
-    g_swapChain->setVsyncEnabled(Config::VSync);
-    g_swapChainValid &= !g_swapChain->needsResize();
+    static uint64_t s_installerInvalidCounter = 0;
 
-    if (!g_swapChainValid)
+    g_swapChain->setVsyncEnabled(Config::VSync);
+    const bool needsResize = g_swapChain->needsResize();
+
+    if (needsResize)
+        g_swapChainValid = false;
+
+    if (!g_swapChainValid && needsResize)
     {
         Video::WaitForGPU();
         g_backBuffer->framebuffers.clear();
         g_swapChainValid = g_swapChain->resize();
         g_needsResize = g_swapChainValid;
+    }
+    else if (!g_swapChainValid)
+    {
+        // Recover from present/acquire failures that don't require a resize.
+        g_swapChainValid = true;
     }
 
     if (g_swapChainValid)
@@ -1588,6 +1603,17 @@ static void CheckSwapChain()
         g_swapChainAcquireProfiler.Begin();
         g_swapChainValid = g_swapChain->acquireTexture(g_acquireSemaphores[g_frame].get(), &g_backBufferIndex);
         g_swapChainAcquireProfiler.End();
+    }
+
+    if (InstallerWizard::s_isVisible && !g_swapChainValid)
+    {
+        s_installerInvalidCounter++;
+        if ((s_installerInvalidCounter % 120) == 0)
+        {
+            os::logger::Log(fmt::format(
+                "CheckSwapChain - still invalid during installer (count: {}, needsResize: {}, swapChainSize: {}x{}, isEmpty: {})",
+                s_installerInvalidCounter, needsResize, g_swapChain->getWidth(), g_swapChain->getHeight(), g_swapChain->isEmpty()));
+        }
     }
 
     if (g_needsResize)
@@ -1713,6 +1739,11 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
     ImPlot::CreateContext();
 
     GameWindow::Init(sdlVideoDriver);
+    if (GameWindow::s_pWindow == nullptr)
+    {
+        LOG_ERROR("Video::CreateHostDevice - GameWindow initialization failed (SDL window is null).");
+        return false;
+    }
 
 #if defined(UNLEASHED_RECOMP_D3D12)
     g_backend = (DetectWine() || Config::GraphicsAPI == EGraphicsAPI::Vulkan) ? Backend::VULKAN : Backend::D3D12;
@@ -2671,6 +2702,16 @@ static void DrawImGui()
     ImGui::Render();
 
     auto drawData = ImGui::GetDrawData();
+    static uint64_t installerDrawCounter = 0;
+    if (InstallerWizard::s_isVisible)
+    {
+        installerDrawCounter++;
+        if ((installerDrawCounter % 120) == 0)
+        {
+            os::logger::Log(fmt::format("DrawImGui heartbeat - installer draw count: {}, cmdLists: {}", installerDrawCounter, drawData->CmdListsCount));
+        }
+    }
+
     if (drawData->CmdListsCount != 0)
     {
         RenderCommand cmd;
@@ -2836,8 +2877,18 @@ static bool g_pendingWaitOnSwapChain = true;
 
 void Video::WaitOnSwapChain()
 {
+    static uint64_t installerWaitCounter = 0;
     if (g_pendingWaitOnSwapChain)
     {
+        if (InstallerWizard::s_isVisible)
+        {
+            installerWaitCounter++;
+            if (!g_swapChainValid && (installerWaitCounter % 120) == 0)
+            {
+                os::logger::Log(fmt::format("Video::WaitOnSwapChain - swapchain invalid while installer visible (wait count: {})", installerWaitCounter));
+            }
+        }
+
         if (g_swapChainValid)
         {
             g_presentWaitProfiler.Begin();
@@ -2854,6 +2905,9 @@ static std::atomic<bool> g_executedCommandList;
 
 void Video::Present() 
 {
+    static uint64_t installerPresentCounter = 0;
+    static bool loggedSwapchainInvalid = false;
+
     g_readyForCommands = false;
 
     RenderCommand cmd;
@@ -2861,6 +2915,15 @@ void Video::Present()
     g_renderQueue.enqueue(cmd);
 
     DrawImGui();
+
+    if (InstallerWizard::s_isVisible)
+    {
+        installerPresentCounter++;
+        if ((installerPresentCounter % 120) == 0)
+        {
+            os::logger::Log(fmt::format("Video::Present heartbeat - installer present count: {}, swapchainValid(before): {}", installerPresentCounter, g_swapChainValid));
+        }
+    }
 
     cmd.type = RenderCommandType::ExecuteCommandList;
     g_renderQueue.enqueue(cmd);
@@ -2886,6 +2949,31 @@ void Video::Present()
 
         RenderCommandSemaphore* signalSemaphores[] = { g_renderSemaphores[g_frame].get() };
         g_swapChainValid = g_swapChain->present(g_backBufferIndex, signalSemaphores, std::size(signalSemaphores));
+
+        if (InstallerWizard::s_isVisible && ((installerPresentCounter == 1) || ((installerPresentCounter % 120) == 0)))
+        {
+            os::logger::Log(fmt::format(
+                "Video::Present chain - count: {}, postPresentValid: {}, backBufferIndex: {}, swapChainSize: {}x{}",
+                installerPresentCounter,
+                g_swapChainValid,
+                g_backBufferIndex,
+                g_swapChain->getWidth(),
+                g_swapChain->getHeight()));
+        }
+
+        if (InstallerWizard::s_isVisible)
+        {
+            if (!g_swapChainValid && !loggedSwapchainInvalid)
+            {
+                os::logger::Log("Video::Present - swapchain became invalid during installer");
+                loggedSwapchainInvalid = true;
+            }
+            else if (g_swapChainValid && loggedSwapchainInvalid)
+            {
+                os::logger::Log("Video::Present - swapchain recovered during installer");
+                loggedSwapchainInvalid = false;
+            }
+        }
     }
 
     g_pendingWaitOnSwapChain = true;
@@ -5698,6 +5786,37 @@ static RenderFormat ConvertDXGIFormat(ddspp::DXGIFormat format)
     }
 }
 
+static bool IsBCFormat(RenderFormat format)
+{
+    switch (format)
+    {
+    case RenderFormat::BC1_TYPELESS:
+    case RenderFormat::BC1_UNORM:
+    case RenderFormat::BC1_UNORM_SRGB:
+    case RenderFormat::BC2_TYPELESS:
+    case RenderFormat::BC2_UNORM:
+    case RenderFormat::BC2_UNORM_SRGB:
+    case RenderFormat::BC3_TYPELESS:
+    case RenderFormat::BC3_UNORM:
+    case RenderFormat::BC3_UNORM_SRGB:
+    case RenderFormat::BC4_TYPELESS:
+    case RenderFormat::BC4_UNORM:
+    case RenderFormat::BC4_SNORM:
+    case RenderFormat::BC5_TYPELESS:
+    case RenderFormat::BC5_UNORM:
+    case RenderFormat::BC5_SNORM:
+    case RenderFormat::BC6H_TYPELESS:
+    case RenderFormat::BC6H_UF16:
+    case RenderFormat::BC6H_SF16:
+    case RenderFormat::BC7_TYPELESS:
+    case RenderFormat::BC7_UNORM:
+    case RenderFormat::BC7_UNORM_SRGB:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataSize, RenderComponentMapping componentMapping, bool forceCubeMap = false)
 {
     ddspp::Descriptor ddsDesc;
@@ -5715,6 +5834,53 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
         desc.arraySize = arraySize;
         desc.format = ConvertDXGIFormat(ddsDesc.format);
         desc.flags = ddsDesc.type == ddspp::TextureType::Cubemap ? RenderTextureFlag::CUBE : RenderTextureFlag::NONE;
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        if (IsBCFormat(desc.format))
+        {
+            static uint64_t s_bcFallbackCount = 0;
+            s_bcFallbackCount++;
+            if (s_bcFallbackCount <= 16 || (s_bcFallbackCount % 64) == 0)
+            {
+                os::logger::Log(fmt::format(
+                    "LoadTexture iOS BC fallback - count: {}, format: {}, size: {}x{}, mips: {}, array: {}",
+                    s_bcFallbackCount,
+                    (int)desc.format,
+                    desc.width,
+                    desc.height,
+                    desc.mipLevels,
+                    desc.arraySize));
+            }
+
+            texture.textureHolder = g_device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, RenderFormat::R8G8B8A8_UNORM));
+            texture.texture = texture.textureHolder.get();
+            texture.viewDimension = RenderTextureViewDimension::TEXTURE_2D;
+            texture.layout = RenderTextureLayout::COPY_DEST;
+
+            texture.descriptorIndex = g_textureDescriptorAllocator.allocate();
+            g_textureDescriptorSet->setTexture(texture.descriptorIndex, texture.texture, RenderTextureLayout::SHADER_READ);
+
+            auto uploadBuffer = g_device->createBuffer(RenderBufferDesc::UploadBuffer(PITCH_ALIGNMENT));
+            uint8_t* mappedMemory = reinterpret_cast<uint8_t*>(uploadBuffer->map());
+            mappedMemory[0] = 0xFF;
+            mappedMemory[1] = 0xFF;
+            mappedMemory[2] = 0xFF;
+            mappedMemory[3] = 0xFF;
+            uploadBuffer->unmap();
+
+            ExecuteCopyCommandList([&]
+                {
+                    g_copyCommandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(texture.texture, RenderTextureLayout::COPY_DEST));
+                    g_copyCommandList->copyTextureRegion(
+                        RenderTextureCopyLocation::Subresource(texture.texture, 0, 0),
+                        RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), RenderFormat::R8G8B8A8_UNORM, 1, 1, 1, PITCH_ALIGNMENT / 4, 0));
+                });
+
+            texture.width = 1;
+            texture.height = 1;
+            return true;
+        }
+#endif
 
         if (forceCubeMap)
         {

@@ -9,6 +9,10 @@
 #include <shellapi.h>
 #endif
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #include <os/logger.h>
 
 // UpdateChecker
@@ -167,8 +171,12 @@ void UpdateChecker::visitWebsite()
     std::string command = "xdg-open " + std::string(VISIT_URL) + " &";
     std::system(command.c_str());
 #elif defined(__APPLE__)
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    SDL_OpenURL(VISIT_URL);
+#else
     std::string command = "open " + std::string(VISIT_URL) + " &";
     std::system(command.c_str());
+#endif
 #else
     static_assert(false, "Visit website not implemented for this platform.");
 #endif

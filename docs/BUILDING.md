@@ -115,3 +115,56 @@ cmake --build ./out/build/macos-release --target UnleashedRecomp
 ```bash
 open -a UnleashedRecomp.app
 ```
+
+### iOS (experimental)
+1. Configure the project with the iOS preset.
+```bash
+cmake . --preset ios-debug
+```
+
+> [!NOTE]
+> The available presets are `ios-debug`, `ios-relwithdebinfo` and `ios-release`.
+
+2. Build the target.
+```bash
+cmake --build ./out/build/ios-debug --target UnleashedRecomp
+```
+
+3. Open the generated Xcode project/build output for signing and deployment to a device.
+
+### iOS with Xcode (device install)
+1. Configure with the Xcode generator preset.
+```bash
+cmake . --preset ios-xcode-debug \
+	-DUNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM=YOURTEAMID \
+	-DUNLEASHED_RECOMP_IOS_BUNDLE_ID=com.yourname.unleashedrecomp
+```
+
+2. Open the generated Xcode project.
+```bash
+open ./out/build/ios-xcode-debug/UnleashedRecomp.xcodeproj
+```
+
+3. In Xcode, select your iPhone/iPad as the run destination and run the `UnleashedRecomp` target.
+
+4. If needed, adjust signing under **Signing & Capabilities** (Automatic signing is enabled by CMake).
+
+> [!IMPORTANT]
+> Current iOS support is experimental and uses pre-generated recompilation/resource artifacts during cross-builds (host-side recompilers and desktop-native file pickers are skipped).
+
+### iOS (Work in Progress)
+1. Configure the project using CMake by navigating to the repository and running one of the iOS presets.
+```bash
+cmake . --preset ios-debug
+```
+
+> [!NOTE]
+> The available presets are `ios-debug`, `ios-relwithdebinfo` and `ios-release`.
+
+2. Build the project using the selected configuration.
+```bash
+cmake --build ./out/build/ios-debug --target UnleashedRecomp
+```
+
+> [!IMPORTANT]
+> iOS support is currently under active porting and desktop-specific features are intentionally disabled there (for example native desktop file picker integration).

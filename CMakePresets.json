@@ -142,9 +142,49 @@
             }
         },
         {
+            "name": "ios-base",
+            "hidden": true,
+            "inherits": "macos-base",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "iOS",
+                "CMAKE_OSX_SYSROOT": "iphoneos",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "15.0",
+                "VCPKG_OSX_DEPLOYMENT_TARGET": "15.0",
+                "VCPKG_TARGET_TRIPLET": {
+                    "value": "arm64-ios",
+                    "type": "STRING"
+                }
+            }
+        },
+        {
+            "name": "ios-xcode-base",
+            "hidden": true,
+            "inherits": "ios-base",
+            "generator": "Xcode",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "installDir": "${sourceDir}/out/install/${presetName}"
+        },
+        {
             "name": "macos-debug",
             "displayName": "macOS-Debug",
             "inherits": "macos-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "ios-debug",
+            "displayName": "iOS-Debug",
+            "inherits": "ios-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "ios-xcode-debug",
+            "displayName": "iOS-Xcode-Debug",
+            "inherits": "ios-xcode-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
             }
@@ -158,9 +198,43 @@
             }
         },
         {
+            "name": "ios-relwithdebinfo",
+            "displayName": "iOS-RelWithDebInfo",
+            "inherits": "ios-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "ios-xcode-relwithdebinfo",
+            "displayName": "iOS-Xcode-RelWithDebInfo",
+            "inherits": "ios-xcode-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
             "name": "macos-release",
             "displayName": "macOS-Release",
             "inherits": "macos-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_INTERPROCEDURAL_OPTIMIZATION": true
+            }
+        },
+        {
+            "name": "ios-release",
+            "displayName": "iOS-Release",
+            "inherits": "ios-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_INTERPROCEDURAL_OPTIMIZATION": true
+            }
+        },
+        {
+            "name": "ios-xcode-release",
+            "displayName": "iOS-Xcode-Release",
+            "inherits": "ios-xcode-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_INTERPROCEDURAL_OPTIMIZATION": true

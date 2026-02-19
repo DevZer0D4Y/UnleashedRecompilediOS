@@ -27,6 +27,7 @@
 #include <ui/installer_wizard.h>
 #include <mod/mod_loader.h>
 #include <preload_executable.h>
+#include <SDL.h>
 
 #ifdef _WIN32
 #include <timeapi.h>
@@ -124,7 +125,7 @@ uint32_t LdrLoadModule(const std::filesystem::path &path)
     auto loadResult = LoadFile(path);
     if (loadResult.empty())
     {
-        assert("Failed to load module" && false);
+        LOGFN_ERROR("Failed to load module: {}", (const char*)path.u8string().c_str());
         return 0;
     }
 
@@ -198,6 +199,10 @@ int main(int argc, char *argv[])
     timeBeginPeriod(1);
 #endif
 
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    SDL_SetMainReady();
+#endif
+
     os::process::CheckConsole();
 
     if (!os::registry::Init())
@@ -240,6 +245,9 @@ int main(int argc, char *argv[])
     }
 
     Config::Load();
+
+    LOGFN("Resolved user path: {}", (const char*)GetUserPath().u8string().c_str());
+    LOGFN("Resolved game path: {}", (const char*)GetGamePath().u8string().c_str());
 
     if (forceInstallationCheck)
     {
@@ -324,9 +332,19 @@ int main(int argc, char *argv[])
 
     HostStartup();
 
+    const std::filesystem::path gameRoot = GetGamePath();
+    const std::filesystem::path patchedExecutablePath = gameRoot / "patched" / "default.xex";
+    const std::filesystem::path updatePatchPath = gameRoot / "update" / "default.xexp";
+    const std::filesystem::path gameExecutablePath = gameRoot / "game" / "default.xex";
+    const bool hasPatchedExecutable = std::filesystem::exists(patchedExecutablePath);
+    const bool hasUpdatePatch = std::filesystem::exists(updatePatchPath);
+    const bool hasGameExecutable = std::filesystem::exists(gameExecutablePath);
+    LOGFN("Install files present - patched/default.xex: {}, update/default.xexp: {}, game/default.xex: {}", hasPatchedExecutable, hasUpdatePatch, hasGameExecutable);
+
     std::filesystem::path modulePath;
-    bool isGameInstalled = Installer::checkGameInstall(GetGamePath(), modulePath);
+    bool isGameInstalled = Installer::checkGameInstall(gameRoot, modulePath);
     bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
+    LOGFN("Install state - gameInstalled: {}, runInstallerWizard: {}, candidateModulePath: {}", isGameInstalled, runInstallerWizard, (const char*)modulePath.u8string().c_str());
     if (runInstallerWizard)
     {
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
@@ -339,6 +357,14 @@ int main(int argc, char *argv[])
         {
             std::_Exit(0);
         }
+
+        isGameInstalled = Installer::checkGameInstall(gameRoot, modulePath);
+        LOGFN("Post-installer state - gameInstalled: {}, modulePath: {}", isGameInstalled, (const char*)modulePath.u8string().c_str());
+        if (!isGameInstalled)
+        {
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), "Install data is still incomplete after installer. Ensure game/update sources are selected and installation finishes.", GameWindow::s_pWindow);
+            std::_Exit(1);
+        }
     }
 
     ModLoader::Init();
@@ -349,6 +375,11 @@ int main(int argc, char *argv[])
     KiSystemStartup();
 
     uint32_t entry = LdrLoadModule(modulePath);
+    if (entry == 0)
+    {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), "Failed to load game executable (patched/default.xex). Re-run installer and verify game/update files.", GameWindow::s_pWindow);
+        std::_Exit(1);
+    }
 
     if (!runInstallerWizard)
     {

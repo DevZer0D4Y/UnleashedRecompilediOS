@@ -1,5 +1,14 @@
 project("UnleashedRecomp")
 
+set(UNLEASHED_RECOMP_IOS OFF)
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS" OR IOS)
+    set(UNLEASHED_RECOMP_IOS ON)
+endif()
+
+set(UNLEASHED_RECOMP_IOS_BUNDLE_ID "io.github.hedgedev.unleashedrecomp" CACHE STRING "iOS bundle identifier")
+set(UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM "" CACHE STRING "Apple Development Team ID for iOS signing")
+set(UNLEASHED_RECOMP_IOS_CODE_SIGN_IDENTITY "Apple Development" CACHE STRING "Code signing identity for iOS")
+
 if (WIN32)
     option(UNLEASHED_RECOMP_D3D12 "Add D3D12 support for rendering" ON)
 endif()
@@ -29,6 +38,12 @@ function(BIN2C)
 
     if(NOT BIN2C_ARGS_COMPRESSION_TYPE)
         set(BIN2C_ARGS_COMPRESSION_TYPE "none")
+    endif()
+
+    if (UNLEASHED_RECOMP_IOS AND EXISTS "${BIN2C_ARGS_DEST_FILE}.c")
+        set_source_files_properties(${BIN2C_ARGS_DEST_FILE}.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+        target_sources(${BIN2C_ARGS_TARGET_OBJ} PRIVATE ${BIN2C_ARGS_DEST_FILE}.c)
+        return()
     endif()
 
     add_custom_command(OUTPUT "${BIN2C_ARGS_DEST_FILE}.c"
@@ -261,6 +276,10 @@ endif()
 
 if (UNLEASHED_RECOMP_METAL)
     set(XCRUN_TOOL "/usr/bin/xcrun")
+    set(UNLEASHED_RECOMP_APPLE_SDK "macosx")
+    if (UNLEASHED_RECOMP_IOS)
+        set(UNLEASHED_RECOMP_APPLE_SDK "iphoneos")
+    endif()
 endif()
 
 GenerateVersionSources(
@@ -300,7 +319,7 @@ if (WIN32)
     if (${CMAKE_BUILD_TYPE} MATCHES "Release")
         target_link_options(UnleashedRecomp PRIVATE "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
     endif()
-elseif (APPLE)
+elseif (APPLE AND NOT UNLEASHED_RECOMP_IOS)
     # Create version number for app bundle.
     CreateVersionString(
         VERSION_TXT ${VERSION_TXT}
@@ -349,6 +368,46 @@ elseif (APPLE)
     add_custom_target(CopyMoltenVK DEPENDS ${MVK_ICD_DST} ${MVK_DYLIB_DST})
     add_dependencies(CopyMoltenVK MoltenVK)
     add_dependencies(UnleashedRecomp CopyMoltenVK)
+elseif (UNLEASHED_RECOMP_IOS)
+    CreateVersionString(
+        VERSION_TXT ${VERSION_TXT}
+        OUTPUT_VAR IOS_BUNDLE_VERSION
+    )
+
+    add_executable(UnleashedRecomp MACOSX_BUNDLE ${UNLEASHED_RECOMP_CXX_SOURCES})
+
+    set(UNLEASHED_RECOMP_IOS_XCODE_PROPS
+        OUTPUT_NAME "Unleashed Recompiled"
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/res/ios/Info.plist.in
+        MACOSX_BUNDLE_GUI_IDENTIFIER ${UNLEASHED_RECOMP_IOS_BUNDLE_ID}
+        MACOSX_BUNDLE_BUNDLE_NAME "Unleashed Recompiled"
+        MACOSX_BUNDLE_BUNDLE_VERSION ${IOS_BUNDLE_VERSION}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${IOS_BUNDLE_VERSION}
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${UNLEASHED_RECOMP_IOS_BUNDLE_ID}
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
+        XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+        XCODE_ATTRIBUTE_ENABLE_BITCODE "NO"
+    )
+
+    if (UNLEASHED_RECOMP_IOS_CODE_SIGN_IDENTITY)
+        list(APPEND UNLEASHED_RECOMP_IOS_XCODE_PROPS
+            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ${UNLEASHED_RECOMP_IOS_CODE_SIGN_IDENTITY}
+        )
+    endif()
+
+    if (UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM)
+        list(APPEND UNLEASHED_RECOMP_IOS_XCODE_PROPS
+            XCODE_ATTRIBUTE_DEVELOPMENT_TEAM ${UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM}
+        )
+    endif()
+
+    set_target_properties(UnleashedRecomp PROPERTIES
+        ${UNLEASHED_RECOMP_IOS_XCODE_PROPS}
+    )
+
+    target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS)
 else()
     add_executable(UnleashedRecomp ${UNLEASHED_RECOMP_CXX_SOURCES})
 endif()
@@ -361,6 +420,7 @@ if (UNLEASHED_RECOMP_FLATPAK)
 endif()
 
 find_package(CURL REQUIRED)
+find_package(fmt CONFIG REQUIRED)
 
 if (UNLEASHED_RECOMP_D3D12)
     find_package(directx-headers CONFIG REQUIRED)
@@ -403,7 +463,6 @@ target_link_libraries(UnleashedRecomp PRIVATE
     fmt::fmt
     libzstd_static
     msdf-atlas-gen::msdf-atlas-gen
-    nfd::nfd
     o1heap
     XenonUtils
     SDL2::SDL2-static
@@ -414,6 +473,11 @@ target_link_libraries(UnleashedRecomp PRIVATE
     CURL::libcurl
     plume
 )
+
+if (TARGET nfd::nfd)
+    target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_HAS_NFD)
+    target_link_libraries(UnleashedRecomp PRIVATE nfd::nfd)
+endif()
 
 target_include_directories(UnleashedRecomp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -434,19 +498,29 @@ function(compile_shader FILE_PATH TARGET_NAME)
     set(MSL_FILE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/gpu/shader/msl/${FILE_PATH}.metal)
     cmake_path(GET HLSL_FILE_PATH STEM HLSL_NAME)
     cmake_path(GET MSL_FILE_PATH STEM MSL_NAME)
+
     if (UNLEASHED_RECOMP_METAL)
         add_custom_command(
                 OUTPUT ${MSL_FILE_PATH}.ir
-                COMMAND ${XCRUN_TOOL} -sdk macosx metal -o ${MSL_FILE_PATH}.ir -c ${MSL_FILE_PATH} -D__air__ -frecord-sources -gline-tables-only
+            COMMAND ${XCRUN_TOOL} -sdk ${UNLEASHED_RECOMP_APPLE_SDK} metal -o ${MSL_FILE_PATH}.ir -c ${MSL_FILE_PATH} -D__air__ -frecord-sources -gline-tables-only
                 DEPENDS ${MSL_FILE_PATH}
         )
         add_custom_command(
                 OUTPUT ${MSL_FILE_PATH}.metallib
-                COMMAND ${XCRUN_TOOL} -sdk macosx metallib -o ${MSL_FILE_PATH}.metallib ${MSL_FILE_PATH}.ir
+            COMMAND ${XCRUN_TOOL} -sdk ${UNLEASHED_RECOMP_APPLE_SDK} metallib -o ${MSL_FILE_PATH}.metallib ${MSL_FILE_PATH}.ir
                 DEPENDS ${MSL_FILE_PATH}.ir
         )
         BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${MSL_FILE_PATH}.metallib" DEST_FILE "${MSL_FILE_PATH}.metallib" ARRAY_NAME "g_${MSL_NAME}_air")
     endif()
+
+    if (UNLEASHED_RECOMP_IOS AND NOT DIRECTX_DXC_TOOL)
+        if (NOT EXISTS ${HLSL_FILE_PATH}.spirv.h)
+            message(FATAL_ERROR "Missing pre-generated SPIR-V header for iOS build: ${HLSL_FILE_PATH}.spirv.h")
+        endif()
+        target_sources(UnleashedRecomp PRIVATE ${HLSL_FILE_PATH}.spirv.h)
+        return()
+    endif()
+
     if (UNLEASHED_RECOMP_D3D12)
         add_custom_command(
             OUTPUT ${HLSL_FILE_PATH}.dxil.h

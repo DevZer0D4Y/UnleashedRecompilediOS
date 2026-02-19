@@ -837,8 +837,16 @@ void Config::Save()
 
     auto userPath = GetUserPath();
 
-    if (!std::filesystem::exists(userPath))
-        std::filesystem::create_directory(userPath);
+    std::error_code ec;
+    if (!std::filesystem::exists(userPath, ec))
+    {
+        std::filesystem::create_directories(userPath, ec);
+        if (ec)
+        {
+            LOGFN_ERROR("Failed to create user directory '{}': {}", userPath.string().c_str(), ec.message().c_str());
+            return;
+        }
+    }
 
     std::string result;
     std::string section;
