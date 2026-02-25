@@ -293,6 +293,8 @@ This is a hardware issue with iOS not supporting BC7 textures. Every time you en
 This is an issue with how memory management is handled on iOS, basically the game can't free memory properly and memory usage grows over time, with the problem being made FAR worse while running with a debugger. For most gameplay, this shouldn't be an issue as it doesn't grow very fast unless the gameplay state is loaded multiple times.
 
 Why it grows even faster on a debugger, I have no clue. If you can figure it out, please submit a PR.
+>Update:
+>This may be fixed??? I didn't change anything other than compiling with -O2 but the memory usage without a debugger may have gone away.
 
 ## FAQ
 
@@ -438,11 +440,16 @@ If you're using a third-party input translation layer (such as DS4Windows or Ste
 
 ### Will macOS be supported?
 
-While macOS is not currently on the roadmap, this project welcomes any effort to add support for this platform. Unleashed Recompiled relies on [plume](https://github.com/renderbag/plume), a rendering hardware abstraction layer that will be getting support for Metal in the near future. You can join the macOS discussion on [this issue](https://github.com/hedge-dev/UnleashedRecomp/issues/455).
+~~While macOS is not currently on the roadmap, this project welcomes any effort to add support for this platform. Unleashed Recompiled relies on [plume](https://github.com/renderbag/plume), a rendering hardware abstraction layer that will be getting support for Metal in the near future. You can join the macOS discussion on [this issue](https://github.com/hedge-dev/UnleashedRecomp/issues/455).~~
+
+macOS is now officially supported in this fork!
 
 ### What other platforms will be supported?
 
 This project does not plan to support any more platforms other than Windows, Linux and potentially macOS at the moment. Any contributors who wish to support more platforms should do so through a fork.
+
+>[!NOTE]
+> Both macOS and iOS are supported in this fork!
 
 ### Do you have plans to recompile other Xbox 360 games or Sonic games?
 

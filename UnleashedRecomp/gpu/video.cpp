@@ -35,8 +35,11 @@
 #include <os/logger.h>
 #include <os/process.h>
 
+#include <cstdlib>
+
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
+#include <mach/mach.h>
 #endif
 
 #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
@@ -1764,6 +1767,13 @@ static void ApplyLowEndDefaults()
     }
 }
 
+#if defined(__APPLE__) && TARGET_OS_IOS
+static void ApplyIOSMetalHUDConfig()
+{
+    setenv("MTL_HUD_ENABLED", Config::MetalHUD ? "1" : "0", 1);
+}
+#endif
+
 bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
 {
     for (uint32_t i = 0; i < 16; i++)
@@ -1784,6 +1794,10 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
     g_backend = (DetectWine() || Config::GraphicsAPI == EGraphicsAPI::Vulkan) ? Backend::VULKAN : Backend::D3D12;
 #elif defined(UNLEASHED_RECOMP_METAL)
     g_backend = Config::GraphicsAPI == EGraphicsAPI::Vulkan ? Backend::VULKAN : Backend::METAL;
+#endif
+
+#if defined(__APPLE__) && TARGET_OS_IOS
+    ApplyIOSMetalHUDConfig();
 #endif
 
     // Attempt to create the possible backends using a vector of function pointers. Whichever succeeds first will be the chosen API.
@@ -2588,6 +2602,7 @@ static void DrawProfiler()
         ImGui::Text("Triangle Strip Workaround: %s", g_triangleStripWorkaround ? "Enabled" : "Disabled");
         ImGui::NewLine();
 
+#ifndef NDEBUG
         std::string backend;
 
         switch (g_backend) {
@@ -2610,6 +2625,9 @@ static void DrawProfiler()
         ImGui::Text("VRAM: %.2f MiB", (double)(g_device->getDescription().dedicatedVideoMemory) / (1024.0 * 1024.0));
         ImGui::Text("UMA: %s", g_capabilities.uma ? "Supported" : "Unsupported");
         ImGui::Text("GPU Upload Heap: %s", g_capabilities.gpuUploadHeap ? "Supported" : "Unsupported");
+
+        ImGui::NewLine();
+#endif
 
         const char* sdlVideoDriver = SDL_GetCurrentVideoDriver();
         if (sdlVideoDriver != nullptr)
@@ -2675,6 +2693,60 @@ static void DrawFPS()
     drawList->AddRectFilled(min, max, IM_COL32(0, 0, 0, 200));
     drawList->AddText(font, fontSize, textPos, IM_COL32_WHITE, fmt.c_str());
 }
+
+#if defined(__APPLE__) && TARGET_OS_IOS
+static uint64_t GetIOSFreeMemoryBytes()
+{
+    mach_port_t hostPort = mach_host_self();
+    vm_size_t pageSize = 0;
+    if (host_page_size(hostPort, &pageSize) != KERN_SUCCESS)
+        return 0;
+
+    vm_statistics64_data_t vmStats{};
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(hostPort, HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&vmStats), &count) != KERN_SUCCESS)
+        return 0;
+
+    return (uint64_t(vmStats.free_count) + uint64_t(vmStats.inactive_count)) * uint64_t(pageSize);
+}
+
+static void DrawIOSLowMemoryWarning()
+{
+    constexpr uint64_t warningThresholdBytes = 500ull * 1024ull * 1024ull;
+
+    static double nextSampleTime = 0.0;
+    static uint64_t freeMemoryBytes = 0;
+
+    const double currentTime = ImGui::GetTime();
+    if (currentTime >= nextSampleTime)
+    {
+        freeMemoryBytes = GetIOSFreeMemoryBytes();
+        nextSampleTime = currentTime + 0.5;
+    }
+
+    if (freeMemoryBytes == 0 || freeMemoryBytes >= warningThresholdBytes)
+        return;
+
+    const double freeMemoryMiB = double(freeMemoryBytes) / (1024.0 * 1024.0);
+    const std::string warningText = fmt::format("Low memory warning: {:.0f} MB free", freeMemoryMiB);
+
+    auto* drawList = ImGui::GetBackgroundDrawList();
+    ImFont* font = ImFontAtlasSnapshot::GetFont("FOT-SeuratPro-M.otf");
+    const float fontSize = Scale(11);
+    const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, warningText.c_str());
+    const ImVec2 textPos = {
+        std::max(Scale(8), (float(Video::s_viewportWidth) - textSize.x) * 0.5f),
+        Scale(8)
+    };
+
+    const ImVec2 padding = { Scale(8), Scale(4) };
+    const ImVec2 bgMin = { textPos.x - padding.x, textPos.y - padding.y };
+    const ImVec2 bgMax = { textPos.x + textSize.x + padding.x, textPos.y + textSize.y + padding.y };
+
+    drawList->AddRectFilled(bgMin, bgMax, IM_COL32(0, 0, 0, 185), Scale(4));
+    drawList->AddText(font, fontSize, textPos, IM_COL32(255, 165, 0, 255), warningText.c_str());
+}
+#endif
 
 static void DrawImGui()
 {
@@ -2743,6 +2815,9 @@ static void DrawImGui()
     assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
 
     DrawFPS();
+#if defined(__APPLE__) && TARGET_OS_IOS
+    DrawIOSLowMemoryWarning();
+#endif
     DrawProfiler();
     ImGui::Render();
 

@@ -100,6 +100,9 @@ static bool g_canReset = false;
 static bool g_isLanguageOptionChanged = false;
 static bool g_titleAnimBegin = true;
 static EChannelConfiguration g_currentChannelConfig;
+#if defined(__APPLE__) && TARGET_OS_IOS
+static bool g_currentMetalHUD;
+#endif
 
 static double g_appearTime = 0.0;
 
@@ -1272,6 +1275,9 @@ static void DrawConfigOptions()
             DrawConfigOption(rowCount++, yOffset, &Config::ResolutionScale, true, nullptr, 0.25f, 1.0f, 2.0f);
             DrawConfigOption(rowCount++, yOffset, &Config::Fullscreen, true);
             DrawConfigOption(rowCount++, yOffset, &Config::VSync, true);
+#if defined(__APPLE__) && TARGET_OS_IOS
+            DrawConfigOption(rowCount++, yOffset, &Config::MetalHUD, true);
+#endif
             DrawConfigOption(rowCount++, yOffset, &Config::FPS, true, nullptr, FPS_MIN, 120, FPS_MAX);
             DrawConfigOption(rowCount++, yOffset, &Config::Brightness, true);
             DrawConfigOption(rowCount++, yOffset, &Config::AntiAliasing, Config::AntiAliasing.InaccessibleValues.size() != 3, &Localise("Options_Desc_NotAvailableHardware"));
@@ -1789,7 +1795,15 @@ void OptionsMenu::Draw()
             DrawFadeTransition();
     }
 
-    s_isRestartRequired = Config::Language != App::s_language || Config::ChannelConfiguration != g_currentChannelConfig;
+    s_isRestartRequired =
+        Config::Language != App::s_language ||
+        Config::ChannelConfiguration != g_currentChannelConfig
+    #if defined(__APPLE__) && TARGET_OS_IOS
+        ||
+        Config::MetalHUD != g_currentMetalHUD;
+    #else
+        ;
+    #endif
 }
 
 void OptionsMenu::Open(bool isPause, SWA::EMenuType pauseMenuType)
@@ -1806,6 +1820,9 @@ void OptionsMenu::Open(bool isPause, SWA::EMenuType pauseMenuType)
     g_selectedItem = nullptr;
     g_titleAnimBegin = true;
     g_currentChannelConfig = Config::ChannelConfiguration;
+#if defined(__APPLE__) && TARGET_OS_IOS
+    g_currentMetalHUD = Config::MetalHUD;
+#endif
 
     /* Store button state so we can track it later
        and prevent the first item being selected. */
