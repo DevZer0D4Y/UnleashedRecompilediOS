@@ -199,10 +199,6 @@ int main(int argc, char *argv[])
     timeBeginPeriod(1);
 #endif
 
-#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-    SDL_SetMainReady();
-#endif
-
     os::process::CheckConsole();
 
     if (!os::registry::Init())

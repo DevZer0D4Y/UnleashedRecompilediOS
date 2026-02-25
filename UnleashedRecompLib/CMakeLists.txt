@@ -99,6 +99,16 @@ add_library(UnleashedRecompLib
     "shader/shader_cache.cpp"
 )
 
+if (UNLEASHED_RECOMP_IOS)
+    target_compile_definitions(UnleashedRecompLib PUBLIC
+        "$<$<CONFIG:Debug>:UNLEASHED_RECOMP_PPC_BOUNDS_CHECK>"
+    )
+
+    target_compile_options(UnleashedRecompLib PRIVATE
+        "$<$<CONFIG:Debug>:-O2>"
+    )
+endif()
+
 target_include_directories(UnleashedRecompLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(UnleashedRecompLib PRIVATE "${UNLEASHED_RECOMP_TOOLS_ROOT}/XenonRecomp/thirdparty/simde")
 target_precompile_headers(UnleashedRecompLib PUBLIC "ppc/ppc_recomp_shared.h")

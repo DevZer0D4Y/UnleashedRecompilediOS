@@ -14,6 +14,7 @@
 #include "hashes/mazuri.h"
 #include "hashes/spagonia.h"
 #include "hashes/update.h"
+#include <os/logger.h>
 
 static const std::string GameDirectory = "game";
 static const std::string DLCDirectory = "dlc";
@@ -49,22 +50,31 @@ static std::string toLower(std::string str) {
 
 static std::unique_ptr<VirtualFileSystem> createFileSystemFromPath(const std::filesystem::path &path)
 {
-    if (XContentFileSystem::check(path))
+    try
     {
-        return XContentFileSystem::create(path);
+        if (XContentFileSystem::check(path))
+        {
+            return XContentFileSystem::create(path);
+        }
+
+        if (toLower(fromPath(path.extension())) == ISOExtension)
+        {
+            return ISOFileSystem::create(path);
+        }
+
+        std::error_code ec;
+        bool isDirectory = std::filesystem::is_directory(path, ec);
+        if (!ec && isDirectory)
+        {
+            return DirectoryFileSystem::create(path);
+        }
     }
-    else if (toLower(fromPath(path.extension())) == ISOExtension)
-    {
-        return ISOFileSystem::create(path);
-    }
-    else if (std::filesystem::is_directory(path))
-    {
-        return DirectoryFileSystem::create(path);
-    }
-    else
+    catch (...)
     {
         return nullptr;
     }
+
+    return nullptr;
 }
 
 static bool checkFile(const FilePair &pair, const uint64_t *fileHashes, const std::filesystem::path &targetDirectory, std::vector<uint8_t> &fileData, Journal &journal, const std::function<bool()> &progressCallback, bool checkSizeOnly) {
@@ -669,49 +679,99 @@ void Installer::rollback(Journal &journal)
 
 bool Installer::parseGame(const std::filesystem::path &sourcePath)
 {
-    std::unique_ptr<VirtualFileSystem> sourceVfs = createFileSystemFromPath(sourcePath);
-    if (sourceVfs == nullptr)
+    try
+    {
+        std::unique_ptr<VirtualFileSystem> sourceVfs = createFileSystemFromPath(sourcePath);
+        if (sourceVfs == nullptr)
+        {
+            return false;
+        }
+
+        return sourceVfs->exists(GameExecutableFile);
+    }
+    catch (...)
     {
         return false;
     }
-
-    return sourceVfs->exists(GameExecutableFile);
 }
 
 bool Installer::parseUpdate(const std::filesystem::path &sourcePath)
 {
-    std::unique_ptr<VirtualFileSystem> sourceVfs = createFileSystemFromPath(sourcePath);
-    if (sourceVfs == nullptr)
+    try
+    {
+        std::unique_ptr<VirtualFileSystem> sourceVfs = createFileSystemFromPath(sourcePath);
+        if (sourceVfs == nullptr)
+        {
+            return false;
+        }
+
+        return sourceVfs->exists(UpdateExecutablePatchFile);
+    }
+    catch (...)
     {
         return false;
     }
-
-    return sourceVfs->exists(UpdateExecutablePatchFile);
 }
 
 DLC Installer::parseDLC(const std::filesystem::path &sourcePath)
 {
-    Journal journal;
-    std::unique_ptr<VirtualFileSystem> sourceVfs = createFileSystemFromPath(sourcePath);
-    if (sourceVfs == nullptr)
+    try
+    {
+        Journal journal;
+        std::unique_ptr<VirtualFileSystem> sourceVfs = createFileSystemFromPath(sourcePath);
+        if (sourceVfs == nullptr)
+        {
+            return DLC::Unknown;
+        }
+
+        return detectDLC(sourcePath, *sourceVfs, journal);
+    }
+    catch (...)
     {
         return DLC::Unknown;
     }
-
-    return detectDLC(sourcePath, *sourceVfs, journal);
 }
 
 XexPatcher::Result Installer::checkGameUpdateCompatibility(const std::filesystem::path &gameSourcePath, const std::filesystem::path &updateSourcePath)
 {
+    auto pathToString = [](const std::filesystem::path& path)
+    {
+        std::u8string value = path.u8string();
+        return std::string(value.begin(), value.end());
+    };
+
+    auto patcherResultToString = [](XexPatcher::Result result)
+    {
+        switch (result)
+        {
+            case XexPatcher::Result::Success: return "Success";
+            case XexPatcher::Result::FileOpenFailed: return "FileOpenFailed";
+            case XexPatcher::Result::FileWriteFailed: return "FileWriteFailed";
+            case XexPatcher::Result::XexFileUnsupported: return "XexFileUnsupported";
+            case XexPatcher::Result::XexFileInvalid: return "XexFileInvalid";
+            case XexPatcher::Result::PatchFileInvalid: return "PatchFileInvalid";
+            case XexPatcher::Result::PatchIncompatible: return "PatchIncompatible";
+            case XexPatcher::Result::PatchFailed: return "PatchFailed";
+            case XexPatcher::Result::PatchUnsupported: return "PatchUnsupported";
+            default: return "Unknown";
+        }
+    };
+
     std::unique_ptr<VirtualFileSystem> gameSourceVfs = createFileSystemFromPath(gameSourcePath);
     if (gameSourceVfs == nullptr)
     {
+        os::logger::Log(fmt::format(
+            "Installer::checkGameUpdateCompatibility - failed to create game VFS for '{}'",
+            pathToString(gameSourcePath)));
         return XexPatcher::Result::FileOpenFailed;
     }
 
     std::unique_ptr<VirtualFileSystem> updateSourceVfs = createFileSystemFromPath(updateSourcePath);
     if (updateSourceVfs == nullptr)
     {
+        os::logger::Log(fmt::format(
+            "Installer::checkGameUpdateCompatibility - failed to create update VFS for '{}'",
+            pathToString(updateSourcePath)));
         return XexPatcher::Result::FileOpenFailed;
     }
 
@@ -719,14 +779,41 @@ XexPatcher::Result Installer::checkGameUpdateCompatibility(const std::filesystem
     std::vector<uint8_t> patchBytes;
     if (!gameSourceVfs->load(GameExecutableFile, xexBytes))
     {
+        os::logger::Log(fmt::format(
+            "Installer::checkGameUpdateCompatibility - failed to load '{}' from game source '{}' (vfs='{}', exists={}, size={})",
+            GameExecutableFile,
+            pathToString(gameSourcePath),
+            gameSourceVfs->getName(),
+            gameSourceVfs->exists(GameExecutableFile),
+            gameSourceVfs->getSize(GameExecutableFile)));
         return XexPatcher::Result::FileOpenFailed;
     }
 
     if (!updateSourceVfs->load(UpdateExecutablePatchFile, patchBytes))
     {
+        os::logger::Log(fmt::format(
+            "Installer::checkGameUpdateCompatibility - failed to load '{}' from update source '{}' (vfs='{}', exists={}, size={})",
+            UpdateExecutablePatchFile,
+            pathToString(updateSourcePath),
+            updateSourceVfs->getName(),
+            updateSourceVfs->exists(UpdateExecutablePatchFile),
+            updateSourceVfs->getSize(UpdateExecutablePatchFile)));
         return XexPatcher::Result::FileOpenFailed;
     }
 
     std::vector<uint8_t> patchedBytes;
-    return XexPatcher::apply(xexBytes.data(), xexBytes.size(), patchBytes.data(), patchBytes.size(), patchedBytes, true);
+    XexPatcher::Result result = XexPatcher::apply(xexBytes.data(), xexBytes.size(), patchBytes.data(), patchBytes.size(), patchedBytes, true);
+    if (result != XexPatcher::Result::Success)
+    {
+        os::logger::Log(fmt::format(
+            "Installer::checkGameUpdateCompatibility - patch apply failed: result={} ({}) game='{}' update='{}' xexBytes={} patchBytes={}",
+            int(result),
+            patcherResultToString(result),
+            pathToString(gameSourcePath),
+            pathToString(updateSourcePath),
+            xexBytes.size(),
+            patchBytes.size()));
+    }
+
+    return result;
 }

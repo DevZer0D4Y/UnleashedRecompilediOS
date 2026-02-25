@@ -50,7 +50,9 @@ struct DirectoryFileSystem : VirtualFileSystem
             return false;
         }
 
-        return std::filesystem::exists(directoryPath / std::filesystem::path(std::u8string_view((const char8_t *)(path.c_str()))));
+        std::error_code ec;
+        bool result = std::filesystem::exists(directoryPath / std::filesystem::path(std::u8string_view((const char8_t *)(path.c_str()))), ec);
+        return !ec && result;
     }
 
     const std::string &getName() const override
@@ -60,7 +62,10 @@ struct DirectoryFileSystem : VirtualFileSystem
 
     static std::unique_ptr<VirtualFileSystem> create(const std::filesystem::path &directoryPath)
     {
-        if (std::filesystem::exists(directoryPath))
+        std::error_code ec;
+        bool exists = std::filesystem::exists(directoryPath, ec);
+        bool isDirectory = std::filesystem::is_directory(directoryPath, ec);
+        if (!ec && exists && isDirectory)
         {
             return std::make_unique<DirectoryFileSystem>(directoryPath);
         }

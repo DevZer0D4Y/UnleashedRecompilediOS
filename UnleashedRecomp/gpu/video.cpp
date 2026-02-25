@@ -29,6 +29,7 @@
 #include <ui/black_bar.h>
 #include <patches/aspect_ratio_patches.h>
 #include <user/config.h>
+#include <user/paths.h>
 #include <sdl_listener.h>
 #include <xxHashMap.h>
 #include <os/logger.h>
@@ -495,9 +496,12 @@ struct UploadBuffer
 
 struct UploadAllocator
 {
+    static constexpr uint32_t TRIM_AFTER_LOW_USAGE_FRAMES = 120;
+
     std::vector<UploadBuffer> buffers;
     uint32_t index = 0;
     uint32_t offset = 0;
+    uint32_t lowUsageFrames = 0;
 
     UploadAllocation allocate(uint32_t size, uint32_t alignment)
     {
@@ -554,6 +558,21 @@ struct UploadAllocator
 
     void reset()
     {
+        // Keep peak buffers during heavy streaming, but drop back to one
+        // upload buffer after a short period of low usage (e.g. menus).
+        if (index == 0)
+        {
+            if (lowUsageFrames < TRIM_AFTER_LOW_USAGE_FRAMES)
+                ++lowUsageFrames;
+
+            if (lowUsageFrames >= TRIM_AFTER_LOW_USAGE_FRAMES && buffers.size() > 1)
+                buffers.resize(1);
+        }
+        else
+        {
+            lowUsageFrames = 0;
+        }
+
         index = 0;
         offset = 0;
     }
@@ -564,10 +583,12 @@ static UploadAllocator g_uploadAllocators[NUM_FRAMES];
 struct IntermediaryUploadAllocator
 {
     static constexpr size_t SIZE = 16 * 1024 * 1024;
+    static constexpr uint32_t TRIM_AFTER_LOW_USAGE_FRAMES = 120;
 
     std::vector<std::unique_ptr<uint8_t[]>> buffers;
     uint32_t index = 0;
     uint32_t offset = 0;
+    uint32_t lowUsageFrames = 0;
 
     uint8_t* allocate(uint32_t size)
     {
@@ -601,6 +622,19 @@ struct IntermediaryUploadAllocator
 
     void reset()
     {
+        if (index == 0)
+        {
+            if (lowUsageFrames < TRIM_AFTER_LOW_USAGE_FRAMES)
+                ++lowUsageFrames;
+
+            if (lowUsageFrames >= TRIM_AFTER_LOW_USAGE_FRAMES && buffers.size() > 1)
+                buffers.resize(1);
+        }
+        else
+        {
+            lowUsageFrames = 0;
+        }
+
         index = 0;
         offset = 0;
     }
@@ -878,6 +912,7 @@ enum class RenderCommandType
     SetStreamSource,
     SetIndices,
     SetPixelShader,
+    TrimRuntimeCaches,
 };
 
 struct RenderCommand
@@ -2150,6 +2185,7 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
 }
 
 static uint32_t g_waitForGPUCount = 0;
+static std::unordered_map<uint16_t, std::unique_ptr<GuestTexture>> g_xdbfTextureCacheOwned;
 
 void Video::WaitForGPU()
 {
@@ -2174,7 +2210,8 @@ void Video::WaitForGPU()
 
 static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5, be<uint32_t>* a6)
 {
-    g_xdbfTextureCache = std::unordered_map<uint16_t, GuestTexture *>();
+    g_xdbfTextureCache.clear();
+    g_xdbfTextureCacheOwned.clear();
 
     for (auto &achievement : g_xdbfWrapper.GetAchievements(XDBF_LANGUAGE_ENGLISH))
     {
@@ -2182,8 +2219,13 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
         if (!achievement.pImageBuffer || !achievement.ImageBufferSize)
             continue;
 
-        g_xdbfTextureCache[achievement.ID] =
-            LoadTexture((uint8_t *)achievement.pImageBuffer, achievement.ImageBufferSize).release();
+        auto texture = LoadTexture((uint8_t *)achievement.pImageBuffer, achievement.ImageBufferSize);
+        if (!texture)
+            continue;
+
+        auto* texturePtr = texture.get();
+        g_xdbfTextureCache.insert_or_assign(achievement.ID, texturePtr);
+        g_xdbfTextureCacheOwned.insert_or_assign(achievement.ID, std::move(texture));
     }
 
     // Move backbuffer to guest memory.
@@ -2259,7 +2301,10 @@ static void LockTextureRect(GuestTexture* texture, uint32_t, GuestLockedRect* lo
 
 static void UnlockTextureRect(GuestTexture* texture) 
 {
-    assert(std::this_thread::get_id() == g_presentThreadId);
+    if (texture == nullptr || texture->mappedMemory == nullptr)
+    {
+        return;
+    }
 
     RenderCommand cmd;
     cmd.type = RenderCommandType::UnlockTextureRect;
@@ -2702,15 +2747,6 @@ static void DrawImGui()
     ImGui::Render();
 
     auto drawData = ImGui::GetDrawData();
-    static uint64_t installerDrawCounter = 0;
-    if (InstallerWizard::s_isVisible)
-    {
-        installerDrawCounter++;
-        if ((installerDrawCounter % 120) == 0)
-        {
-            os::logger::Log(fmt::format("DrawImGui heartbeat - installer draw count: {}, cmdLists: {}", installerDrawCounter, drawData->CmdListsCount));
-        }
-    }
 
     if (drawData->CmdListsCount != 0)
     {
@@ -2877,18 +2913,8 @@ static bool g_pendingWaitOnSwapChain = true;
 
 void Video::WaitOnSwapChain()
 {
-    static uint64_t installerWaitCounter = 0;
     if (g_pendingWaitOnSwapChain)
     {
-        if (InstallerWizard::s_isVisible)
-        {
-            installerWaitCounter++;
-            if (!g_swapChainValid && (installerWaitCounter % 120) == 0)
-            {
-                os::logger::Log(fmt::format("Video::WaitOnSwapChain - swapchain invalid while installer visible (wait count: {})", installerWaitCounter));
-            }
-        }
-
         if (g_swapChainValid)
         {
             g_presentWaitProfiler.Begin();
@@ -2905,9 +2931,6 @@ static std::atomic<bool> g_executedCommandList;
 
 void Video::Present() 
 {
-    static uint64_t installerPresentCounter = 0;
-    static bool loggedSwapchainInvalid = false;
-
     g_readyForCommands = false;
 
     RenderCommand cmd;
@@ -2915,15 +2938,6 @@ void Video::Present()
     g_renderQueue.enqueue(cmd);
 
     DrawImGui();
-
-    if (InstallerWizard::s_isVisible)
-    {
-        installerPresentCounter++;
-        if ((installerPresentCounter % 120) == 0)
-        {
-            os::logger::Log(fmt::format("Video::Present heartbeat - installer present count: {}, swapchainValid(before): {}", installerPresentCounter, g_swapChainValid));
-        }
-    }
 
     cmd.type = RenderCommandType::ExecuteCommandList;
     g_renderQueue.enqueue(cmd);
@@ -2949,31 +2963,6 @@ void Video::Present()
 
         RenderCommandSemaphore* signalSemaphores[] = { g_renderSemaphores[g_frame].get() };
         g_swapChainValid = g_swapChain->present(g_backBufferIndex, signalSemaphores, std::size(signalSemaphores));
-
-        if (InstallerWizard::s_isVisible && ((installerPresentCounter == 1) || ((installerPresentCounter % 120) == 0)))
-        {
-            os::logger::Log(fmt::format(
-                "Video::Present chain - count: {}, postPresentValid: {}, backBufferIndex: {}, swapChainSize: {}x{}",
-                installerPresentCounter,
-                g_swapChainValid,
-                g_backBufferIndex,
-                g_swapChain->getWidth(),
-                g_swapChain->getHeight()));
-        }
-
-        if (InstallerWizard::s_isVisible)
-        {
-            if (!g_swapChainValid && !loggedSwapchainInvalid)
-            {
-                os::logger::Log("Video::Present - swapchain became invalid during installer");
-                loggedSwapchainInvalid = true;
-            }
-            else if (g_swapChainValid && loggedSwapchainInvalid)
-            {
-                os::logger::Log("Video::Present - swapchain recovered during installer");
-                loggedSwapchainInvalid = false;
-            }
-        }
     }
 
     g_pendingWaitOnSwapChain = true;
@@ -3156,6 +3145,42 @@ static void ProcBeginCommandList(const RenderCommand& cmd)
 {
     DestructTempResources();
     BeginCommandList();
+}
+
+static void ProcTrimRuntimeCaches(const RenderCommand&)
+{
+    const size_t pipelinesBefore = g_pipelines.size();
+
+    g_pipelines.clear();
+
+#ifdef PSO_CACHING
+    {
+        std::lock_guard lock(g_pipelineCacheMutex);
+        g_pipelineStatesToCache.clear();
+    }
+#endif
+
+    for (size_t i = 0; i < g_shaderCacheEntryCount; i++)
+    {
+        auto* shader = g_shaderCacheEntries[i].guestShader;
+        if (shader == nullptr)
+            continue;
+
+        std::lock_guard lock(shader->mutex);
+        shader->linkedShaders.clear();
+#ifdef UNLEASHED_RECOMP_D3D12
+        shader->shaderBlobs.clear();
+#endif
+    }
+
+    os::logger::Log(fmt::format("TrimRuntimeCaches - pipelines: {} -> 0", pipelinesBefore));
+}
+
+void Video::QueueTrimRuntimeCaches()
+{
+    RenderCommand cmd;
+    cmd.type = RenderCommandType::TrimRuntimeCaches;
+    g_renderQueue.enqueue(cmd);
 }
 
 static GuestSurface* GetBackBuffer() 
@@ -5458,6 +5483,7 @@ static std::thread g_renderThread([]
                 case RenderCommandType::SetStreamSource:                   ProcSetStreamSource(cmd); break;
                 case RenderCommandType::SetIndices:                        ProcSetIndices(cmd); break;
                 case RenderCommandType::SetPixelShader:                    ProcSetPixelShader(cmd); break;
+                case RenderCommandType::TrimRuntimeCaches:                 ProcTrimRuntimeCaches(cmd); break;
                 default:                                                   assert(false && "Unrecognized render command type."); break;
                 }
             }
@@ -5781,6 +5807,7 @@ static RenderFormat ConvertDXGIFormat(ddspp::DXGIFormat format)
     case ddspp::BC7_UNORM_SRGB:
         return RenderFormat::BC7_UNORM_SRGB;
     default:
+        os::logger::Log(fmt::format("Unsupported DDS DXGI format: {}", int(format)));
         assert(false && "Unsupported format from DDS.");
         return RenderFormat::UNKNOWN;
     }
@@ -5817,7 +5844,355 @@ static bool IsBCFormat(RenderFormat format)
     }
 }
 
-static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataSize, RenderComponentMapping componentMapping, bool forceCubeMap = false)
+static bool IsBC1Format(RenderFormat format)
+{
+    return (format == RenderFormat::BC1_UNORM) || (format == RenderFormat::BC1_UNORM_SRGB) || (format == RenderFormat::BC1_TYPELESS);
+}
+
+static bool IsBC3Format(RenderFormat format)
+{
+    return (format == RenderFormat::BC3_UNORM) || (format == RenderFormat::BC3_UNORM_SRGB) || (format == RenderFormat::BC3_TYPELESS);
+}
+
+static bool IsBC2Format(RenderFormat format)
+{
+    return (format == RenderFormat::BC2_UNORM) || (format == RenderFormat::BC2_UNORM_SRGB) || (format == RenderFormat::BC2_TYPELESS);
+}
+
+static bool IsBC4Format(RenderFormat format)
+{
+    return (format == RenderFormat::BC4_UNORM) || (format == RenderFormat::BC4_SNORM) || (format == RenderFormat::BC4_TYPELESS);
+}
+
+static bool IsBC5Format(RenderFormat format)
+{
+    return (format == RenderFormat::BC5_UNORM) || (format == RenderFormat::BC5_SNORM) || (format == RenderFormat::BC5_TYPELESS);
+}
+
+static bool IsBC7Format(RenderFormat format)
+{
+    return (format == RenderFormat::BC7_UNORM) || (format == RenderFormat::BC7_UNORM_SRGB) || (format == RenderFormat::BC7_TYPELESS);
+}
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+static std::filesystem::path GetBC7OverrideDir()
+{
+    return GetGamePath() / "bc7_override";
+}
+
+static std::filesystem::path GetBC7DumpDir()
+{
+    return GetGamePath() / "bc7_dump";
+}
+
+static std::filesystem::path BuildHashedBC7Path(const std::filesystem::path& directory, uint64_t hash)
+{
+    return directory / fmt::format("{:016X}.dds", hash);
+}
+
+static bool TryLoadBC7OverrideBytes(uint64_t hash, std::vector<uint8_t>& outData, std::filesystem::path& outPath)
+{
+    outPath = BuildHashedBC7Path(GetBC7OverrideDir(), hash);
+
+    std::error_code ec;
+    if (!std::filesystem::exists(outPath, ec) || ec)
+        return false;
+
+    const auto fileSize = std::filesystem::file_size(outPath, ec);
+    if (ec || fileSize == 0)
+        return false;
+
+    outData.resize(size_t(fileSize));
+    std::ifstream file(outPath, std::ios::binary);
+    if (!file)
+        return false;
+
+    file.read(reinterpret_cast<char*>(outData.data()), static_cast<std::streamsize>(outData.size()));
+    return file.good();
+}
+
+static uint64_t HashTextureData(const uint8_t* data, size_t size)
+{
+    uint64_t hash = 1469598103934665603ull;
+    for (size_t i = 0; i < size; i++)
+    {
+        hash ^= data[i];
+        hash *= 1099511628211ull;
+    }
+
+    return hash;
+}
+
+static void DumpBC7TextureForOfflineDecode(const uint8_t* data, size_t dataSize, const ddspp::Descriptor& ddsDesc)
+{
+    static Mutex s_dumpMutex;
+    static ankerl::unordered_dense::set<uint64_t> s_dumpedHashes;
+
+    if (data == nullptr || dataSize <= ddsDesc.headerSize)
+        return;
+
+    const uint64_t hash = HashTextureData(data, dataSize);
+
+    {
+        std::lock_guard<Mutex> lock(s_dumpMutex);
+        auto [it, inserted] = s_dumpedHashes.emplace(hash);
+        if (!inserted)
+            return;
+    }
+
+    std::filesystem::path dumpDir = GetBC7DumpDir();
+    std::error_code ec;
+    std::filesystem::create_directories(dumpDir, ec);
+    if (ec)
+        return;
+
+    std::filesystem::path filePath = BuildHashedBC7Path(dumpDir, hash);
+
+    std::ofstream file(filePath, std::ios::binary | std::ios::trunc);
+    if (!file)
+        return;
+
+    file.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(dataSize));
+    if (!file)
+        return;
+
+    os::logger::Log(fmt::format("Dumped BC7 DDS for offline decode: {}", filePath.string()));
+}
+#endif
+
+static inline uint8_t Expand5To8(uint32_t value)
+{
+    return uint8_t((value << 3) | (value >> 2));
+}
+
+static inline uint8_t Expand6To8(uint32_t value)
+{
+    return uint8_t((value << 2) | (value >> 4));
+}
+
+static void DecodeBC1ColorBlock(const uint8_t* block, uint8_t outRGBA[16 * 4])
+{
+    uint16_t c0 = uint16_t(block[0] | (uint16_t(block[1]) << 8));
+    uint16_t c1 = uint16_t(block[2] | (uint16_t(block[3]) << 8));
+
+    uint8_t colors[4][4] = {};
+
+    colors[0][0] = Expand5To8((c0 >> 11) & 0x1F);
+    colors[0][1] = Expand6To8((c0 >> 5) & 0x3F);
+    colors[0][2] = Expand5To8(c0 & 0x1F);
+    colors[0][3] = 255;
+
+    colors[1][0] = Expand5To8((c1 >> 11) & 0x1F);
+    colors[1][1] = Expand6To8((c1 >> 5) & 0x3F);
+    colors[1][2] = Expand5To8(c1 & 0x1F);
+    colors[1][3] = 255;
+
+    if (c0 > c1)
+    {
+        for (uint32_t i = 0; i < 3; i++)
+        {
+            colors[2][i] = uint8_t((2 * colors[0][i] + colors[1][i]) / 3);
+            colors[3][i] = uint8_t((colors[0][i] + 2 * colors[1][i]) / 3);
+        }
+        colors[2][3] = 255;
+        colors[3][3] = 255;
+    }
+    else
+    {
+        for (uint32_t i = 0; i < 3; i++)
+            colors[2][i] = uint8_t((colors[0][i] + colors[1][i]) / 2);
+
+        colors[2][3] = 255;
+        colors[3][0] = 0;
+        colors[3][1] = 0;
+        colors[3][2] = 0;
+        colors[3][3] = 0;
+    }
+
+    uint32_t indices = uint32_t(block[4]) | (uint32_t(block[5]) << 8) | (uint32_t(block[6]) << 16) | (uint32_t(block[7]) << 24);
+
+    for (uint32_t pixel = 0; pixel < 16; pixel++)
+    {
+        uint32_t colorIndex = (indices >> (pixel * 2)) & 0x3;
+        uint8_t* dst = outRGBA + (pixel * 4);
+        dst[0] = colors[colorIndex][0];
+        dst[1] = colors[colorIndex][1];
+        dst[2] = colors[colorIndex][2];
+        dst[3] = colors[colorIndex][3];
+    }
+}
+
+static void DecodeBC4Block(const uint8_t* block, uint8_t outValues[16])
+{
+    uint8_t v0 = block[0];
+    uint8_t v1 = block[1];
+
+    uint8_t table[8] = {};
+    table[0] = v0;
+    table[1] = v1;
+
+    if (v0 > v1)
+    {
+        table[2] = uint8_t((6 * v0 + 1 * v1) / 7);
+        table[3] = uint8_t((5 * v0 + 2 * v1) / 7);
+        table[4] = uint8_t((4 * v0 + 3 * v1) / 7);
+        table[5] = uint8_t((3 * v0 + 4 * v1) / 7);
+        table[6] = uint8_t((2 * v0 + 5 * v1) / 7);
+        table[7] = uint8_t((1 * v0 + 6 * v1) / 7);
+    }
+    else
+    {
+        table[2] = uint8_t((4 * v0 + 1 * v1) / 5);
+        table[3] = uint8_t((3 * v0 + 2 * v1) / 5);
+        table[4] = uint8_t((2 * v0 + 3 * v1) / 5);
+        table[5] = uint8_t((1 * v0 + 4 * v1) / 5);
+        table[6] = 0;
+        table[7] = 255;
+    }
+
+    uint64_t indices = 0;
+    for (uint32_t i = 0; i < 6; i++)
+        indices |= (uint64_t(block[2 + i]) << (8 * i));
+
+    for (uint32_t p = 0; p < 16; p++)
+        outValues[p] = table[(indices >> (3 * p)) & 0x7];
+}
+
+static bool DecodeBCToRGBA8Mip0(const uint8_t* data, const ddspp::Descriptor& ddsDesc, RenderFormat format, std::vector<uint8_t>& outRGBA)
+{
+    if (ddsDesc.type != ddspp::Texture2D || ddsDesc.arraySize != 1 || ddsDesc.depth != 1)
+        return false;
+
+    if (!IsBC1Format(format) && !IsBC2Format(format) && !IsBC3Format(format) && !IsBC4Format(format) && !IsBC5Format(format))
+        return false;
+
+    uint32_t width = ddsDesc.width;
+    uint32_t height = ddsDesc.height;
+
+    if (width == 0 || height == 0)
+        return false;
+
+    outRGBA.assign(size_t(width) * size_t(height) * 4, 0);
+
+    const uint8_t* src = data + ddsDesc.headerSize;
+    const uint32_t blocksX = (width + 3) / 4;
+    const uint32_t blocksY = (height + 3) / 4;
+    const uint32_t blockSize = IsBC1Format(format) || IsBC4Format(format) ? 8 : 16;
+
+    uint8_t rgbaBlock[16 * 4] = {};
+    uint8_t alphaBlock[16] = {};
+    uint8_t greenBlock[16] = {};
+
+    for (uint32_t by = 0; by < blocksY; by++)
+    {
+        for (uint32_t bx = 0; bx < blocksX; bx++)
+        {
+            const uint8_t* block = src + size_t(by * blocksX + bx) * blockSize;
+
+            if (IsBC1Format(format))
+            {
+                DecodeBC1ColorBlock(block, rgbaBlock);
+            }
+            else if (IsBC2Format(format))
+            {
+                DecodeBC1ColorBlock(block + 8, rgbaBlock);
+
+                for (uint32_t p = 0; p < 16; p++)
+                {
+                    uint8_t packed = block[p / 2];
+                    uint8_t a4 = (p & 1) ? (packed >> 4) : (packed & 0x0F);
+                    rgbaBlock[p * 4 + 3] = uint8_t((a4 << 4) | a4);
+                }
+            }
+            else if (IsBC3Format(format))
+            {
+                uint8_t a0 = block[0];
+                uint8_t a1 = block[1];
+
+                uint8_t alphaTable[8] = {};
+                alphaTable[0] = a0;
+                alphaTable[1] = a1;
+
+                if (a0 > a1)
+                {
+                    alphaTable[2] = uint8_t((6 * a0 + 1 * a1) / 7);
+                    alphaTable[3] = uint8_t((5 * a0 + 2 * a1) / 7);
+                    alphaTable[4] = uint8_t((4 * a0 + 3 * a1) / 7);
+                    alphaTable[5] = uint8_t((3 * a0 + 4 * a1) / 7);
+                    alphaTable[6] = uint8_t((2 * a0 + 5 * a1) / 7);
+                    alphaTable[7] = uint8_t((1 * a0 + 6 * a1) / 7);
+                }
+                else
+                {
+                    alphaTable[2] = uint8_t((4 * a0 + 1 * a1) / 5);
+                    alphaTable[3] = uint8_t((3 * a0 + 2 * a1) / 5);
+                    alphaTable[4] = uint8_t((2 * a0 + 3 * a1) / 5);
+                    alphaTable[5] = uint8_t((1 * a0 + 4 * a1) / 5);
+                    alphaTable[6] = 0;
+                    alphaTable[7] = 255;
+                }
+
+                uint64_t alphaIndices = 0;
+                for (uint32_t i = 0; i < 6; i++)
+                    alphaIndices |= (uint64_t(block[2 + i]) << (8 * i));
+
+                for (uint32_t p = 0; p < 16; p++)
+                    alphaBlock[p] = alphaTable[(alphaIndices >> (3 * p)) & 0x7];
+
+                DecodeBC1ColorBlock(block + 8, rgbaBlock);
+                for (uint32_t p = 0; p < 16; p++)
+                    rgbaBlock[p * 4 + 3] = alphaBlock[p];
+            }
+            else if (IsBC4Format(format))
+            {
+                DecodeBC4Block(block, alphaBlock);
+                for (uint32_t p = 0; p < 16; p++)
+                {
+                    rgbaBlock[p * 4 + 0] = alphaBlock[p];
+                    rgbaBlock[p * 4 + 1] = 0;
+                    rgbaBlock[p * 4 + 2] = 0;
+                    rgbaBlock[p * 4 + 3] = 255;
+                }
+            }
+            else if (IsBC5Format(format))
+            {
+                DecodeBC4Block(block, alphaBlock);
+                DecodeBC4Block(block + 8, greenBlock);
+
+                for (uint32_t p = 0; p < 16; p++)
+                {
+                    rgbaBlock[p * 4 + 0] = alphaBlock[p];
+                    rgbaBlock[p * 4 + 1] = greenBlock[p];
+                    rgbaBlock[p * 4 + 2] = 0;
+                    rgbaBlock[p * 4 + 3] = 255;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            for (uint32_t py = 0; py < 4; py++)
+            {
+                for (uint32_t px = 0; px < 4; px++)
+                {
+                    uint32_t x = bx * 4 + px;
+                    uint32_t y = by * 4 + py;
+                    if (x >= width || y >= height)
+                        continue;
+
+                    size_t dstPixel = (size_t(y) * size_t(width) + x) * 4;
+                    size_t srcPixel = (size_t(py) * 4 + px) * 4;
+                    memcpy(&outRGBA[dstPixel], &rgbaBlock[srcPixel], 4);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataSize, RenderComponentMapping componentMapping, bool forceCubeMap = false, std::string_view sourceName = {})
 {
     ddspp::Descriptor ddsDesc;
     if (ddspp::decode_header((unsigned char *)(data), ddsDesc) != ddspp::Error)
@@ -5838,19 +6213,90 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
 #if defined(__APPLE__) && TARGET_OS_IPHONE
         if (IsBCFormat(desc.format))
         {
+            const uint64_t textureHash = HashTextureData(data, dataSize);
+
+            {
+                std::vector<uint8_t> overrideData;
+                std::filesystem::path overridePath;
+                if (TryLoadBC7OverrideBytes(textureHash, overrideData, overridePath))
+                {
+                    os::logger::Log(fmt::format("LoadTexture iOS BC override found ({:016X}): {}", textureHash, overridePath.string()));
+                    if (LoadTexture(texture, overrideData.data(), overrideData.size(), componentMapping, forceCubeMap, {}))
+                        return true;
+
+                    os::logger::Log(fmt::format("LoadTexture iOS BC override failed to load ({:016X}), falling back to original: {}", textureHash, overridePath.string()));
+                }
+            }
+
             static uint64_t s_bcFallbackCount = 0;
             s_bcFallbackCount++;
-            if (s_bcFallbackCount <= 16 || (s_bcFallbackCount % 64) == 0)
+
+            std::vector<uint8_t> decodedRGBA;
+            bool decoded = DecodeBCToRGBA8Mip0(data, ddsDesc, desc.format, decodedRGBA);
+
+            if (decoded)
             {
-                os::logger::Log(fmt::format(
-                    "LoadTexture iOS BC fallback - count: {}, format: {}, size: {}x{}, mips: {}, array: {}",
-                    s_bcFallbackCount,
-                    (int)desc.format,
-                    desc.width,
-                    desc.height,
-                    desc.mipLevels,
-                    desc.arraySize));
+                texture.textureHolder = g_device->createTexture(RenderTextureDesc::Texture2D(desc.width, desc.height, 1, RenderFormat::R8G8B8A8_UNORM));
+                texture.texture = texture.textureHolder.get();
+                texture.viewDimension = RenderTextureViewDimension::TEXTURE_2D;
+                texture.layout = RenderTextureLayout::COPY_DEST;
+
+                texture.descriptorIndex = g_textureDescriptorAllocator.allocate();
+                g_textureDescriptorSet->setTexture(texture.descriptorIndex, texture.texture, RenderTextureLayout::SHADER_READ);
+
+                uint32_t rowPitch = (desc.width * 4 + PITCH_ALIGNMENT - 1) & ~(PITCH_ALIGNMENT - 1);
+                uint32_t slicePitch = rowPitch * desc.height;
+
+                auto uploadBuffer = g_device->createBuffer(RenderBufferDesc::UploadBuffer(slicePitch));
+                uint8_t* mappedMemory = reinterpret_cast<uint8_t*>(uploadBuffer->map());
+
+                for (uint32_t y = 0; y < desc.height; y++)
+                {
+                    memcpy(mappedMemory + size_t(y) * rowPitch, decodedRGBA.data() + size_t(y) * desc.width * 4, size_t(desc.width) * 4);
+                }
+
+                uploadBuffer->unmap();
+
+                ExecuteCopyCommandList([&]
+                    {
+                        g_copyCommandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(texture.texture, RenderTextureLayout::COPY_DEST));
+                        g_copyCommandList->copyTextureRegion(
+                            RenderTextureCopyLocation::Subresource(texture.texture, 0, 0),
+                            RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), RenderFormat::R8G8B8A8_UNORM, desc.width, desc.height, 1, rowPitch / 4, 0));
+                    });
+
+                texture.width = desc.width;
+                texture.height = desc.height;
+
+                if (s_bcFallbackCount <= 16 || (s_bcFallbackCount % 64) == 0)
+                {
+                    os::logger::Log(fmt::format(
+                        "LoadTexture iOS BC decode - count: {}, format: {}, size: {}x{}, mips: {}, array: {}",
+                        s_bcFallbackCount,
+                        (int)desc.format,
+                        desc.width,
+                        desc.height,
+                        desc.mipLevels,
+                        desc.arraySize));
+                }
+
+                return true;
             }
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+            if (IsBC7Format(desc.format))
+                DumpBC7TextureForOfflineDecode(data, dataSize, ddsDesc);
+#endif
+
+            os::logger::Log(fmt::format(
+                "LoadTexture iOS BC fallback (unsupported format) - count: {}, renderFormat: {}, dxgiFormat: {}, size: {}x{}, mips: {}, array: {}",
+                s_bcFallbackCount,
+                (int)desc.format,
+                int(ddsDesc.format),
+                desc.width,
+                desc.height,
+                desc.mipLevels,
+                desc.arraySize));
 
             texture.textureHolder = g_device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, RenderFormat::R8G8B8A8_UNORM));
             texture.texture = texture.textureHolder.get();
@@ -6059,7 +6505,7 @@ std::unique_ptr<GuestTexture> LoadTexture(const uint8_t* data, size_t dataSize, 
 {
     GuestTexture texture(ResourceType::Texture);
 
-    if (LoadTexture(texture, data, dataSize, componentMapping))
+    if (LoadTexture(texture, data, dataSize, componentMapping, false, {}))
         return std::make_unique<GuestTexture>(std::move(texture));
 
     return nullptr;
@@ -6096,12 +6542,15 @@ static void MakePictureData(GuestPictureData* pictureData, uint8_t* data, uint32
 {
     if ((pictureData->flags & 0x1) == 0 && data != nullptr)
     {
+        const char* textureName = reinterpret_cast<char*>(g_memory.Translate(pictureData->name + 2));
+        std::string_view textureNameView = textureName != nullptr ? std::string_view(textureName) : std::string_view{};
+
         GuestTexture texture(ResourceType::Texture);
 
-        if (LoadTexture(texture, data, dataSize, {}))
+        if (LoadTexture(texture, data, dataSize, {}, false, textureNameView))
         {
 #ifdef _DEBUG
-            texture.texture->setName(reinterpret_cast<char*>(g_memory.Translate(pictureData->name + 2)));
+            texture.texture->setName(textureName);
 #endif
             XXH64_hash_t hash = XXH3_64bits(data, dataSize);
 
@@ -6111,7 +6560,7 @@ static void MakePictureData(GuestPictureData* pictureData, uint8_t* data, uint32
             if (forceCubeMap)
             {
                 GuestTexture recreatedCubeMapTexture(ResourceType::Texture);
-                if (LoadTexture(recreatedCubeMapTexture, data, dataSize, {}, true))
+                if (LoadTexture(recreatedCubeMapTexture, data, dataSize, {}, true, textureNameView))
                     texture.recreatedCubeMapTexture = std::make_unique<GuestTexture>(std::move(recreatedCubeMapTexture));
             }
 
@@ -7182,6 +7631,15 @@ static void CompileParticleMaterialPipeline(const Hedgehog::Sparkle::CParticleMa
 }
 
 static std::thread::id g_mainThreadId = std::this_thread::get_id();
+static std::vector<uint16_t*> g_newIndicesToFree;
+
+static void FreePendingConvertedIndices()
+{
+    for (auto newIndicesToFree : g_newIndicesToFree)
+        g_userHeap.Free(newIndicesToFree);
+
+    g_newIndicesToFree.clear();
+}
 
 // SWA::CGameModeStage::ExitLoading
 PPC_FUNC_IMPL(__imp__sub_825369A0);
@@ -7202,6 +7660,10 @@ PPC_FUNC(sub_825369A0)
     }
 
     __imp__sub_825369A0(ctx, base);
+
+    // Safety net: converted strip indices can survive until stage transitions
+    // if their usual reset path does not run in this flow.
+    FreePendingConvertedIndices();
 }
 
 // CModelData::CheckMadeAll
@@ -7902,8 +8364,6 @@ struct MeshResource
     be<uint32_t> indices;
 };
 
-static std::vector<uint16_t*> g_newIndicesToFree;
-
 // Hedgehog::Mirage::CMeshData::Make
 PPC_FUNC_IMPL(__imp__sub_82E44AF8);
 PPC_FUNC(sub_82E44AF8)
@@ -7953,11 +8413,7 @@ PPC_FUNC_IMPL(__imp__sub_82E250D0);
 PPC_FUNC(sub_82E250D0)
 {
     __imp__sub_82E250D0(ctx, base);
-
-    for (auto newIndicesToFree : g_newIndicesToFree)
-        g_userHeap.Free(newIndicesToFree);
-
-    g_newIndicesToFree.clear();
+    FreePendingConvertedIndices();
 }
 
 struct LightAndIndexBufferResourceV1

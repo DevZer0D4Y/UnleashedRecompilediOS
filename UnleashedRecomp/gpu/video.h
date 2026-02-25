@@ -24,6 +24,7 @@ struct Video
     static void StartPipelinePrecompilation();
     static void WaitForGPU();
     static void ComputeViewportDimensions();
+    static void QueueTrimRuntimeCaches();
 };
 
 enum class Backend {

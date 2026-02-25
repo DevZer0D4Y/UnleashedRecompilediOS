@@ -41,7 +41,7 @@ GuestThreadContext::~GuestThreadContext()
 }
 
 #ifdef USE_PTHREAD
-static size_t GetStackSize()
+static size_t GetStackSize(uint32_t requestedSize)
 {
     // Cache as this should not change.
     static size_t stackSize = 0;
@@ -61,7 +61,20 @@ static size_t GetStackSize()
             stackSize = defaultSize;
         }
     }
-    return stackSize;
+
+    size_t targetSize = stackSize;
+    if (requestedSize != 0)
+    {
+        targetSize = std::max(targetSize, static_cast<size_t>(requestedSize));
+    }
+
+#if defined(UNLEASHED_RECOMP_IOS)
+    constexpr size_t IOS_MIN_GUEST_STACK = 16 * 1024 * 1024;
+    targetSize = std::max(targetSize, IOS_MIN_GUEST_STACK);
+#endif
+
+    targetSize = std::max(targetSize, static_cast<size_t>(PTHREAD_STACK_MIN));
+    return targetSize;
 }
 
 static void* GuestThreadFunc(void* arg)
@@ -84,8 +97,9 @@ GuestThreadHandle::GuestThreadHandle(const GuestThreadParams& params)
 {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, GetStackSize());
+    pthread_attr_setstacksize(&attr, GetStackSize(params.stackSize));
     const auto ret = pthread_create(&thread, &attr, GuestThreadFunc, this);
+    pthread_attr_destroy(&attr);
     if (ret != 0) {
         fprintf(stderr, "pthread_create failed with error code 0x%X.\n", ret);
         return;

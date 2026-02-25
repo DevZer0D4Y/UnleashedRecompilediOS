@@ -11,6 +11,7 @@
 
 
 #include "xcontent_file_system.h"
+#include "xbox.h"
 
 #include <bit>
 #include <set>

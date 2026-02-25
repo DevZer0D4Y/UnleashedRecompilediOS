@@ -21,6 +21,8 @@
 struct ISOFileSystem : VirtualFileSystem
 {
     MemoryMappedFile mappedFile;
+    std::filesystem::path sourcePath;
+    size_t sourceSize = 0;
     std::map<std::string, std::tuple<size_t, size_t>> fileMap;
     std::string name;
 

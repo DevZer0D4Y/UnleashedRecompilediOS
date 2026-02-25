@@ -20,6 +20,8 @@
     <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.games</string>
+    <key>LSSupportsGameMode</key>
+    <true/>
     <key>UIFileSharingEnabled</key>
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>

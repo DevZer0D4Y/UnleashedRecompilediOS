@@ -8,6 +8,18 @@ endif()
 set(UNLEASHED_RECOMP_IOS_BUNDLE_ID "io.github.hedgedev.unleashedrecomp" CACHE STRING "iOS bundle identifier")
 set(UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM "" CACHE STRING "Apple Development Team ID for iOS signing")
 set(UNLEASHED_RECOMP_IOS_CODE_SIGN_IDENTITY "Apple Development" CACHE STRING "Code signing identity for iOS")
+set(UNLEASHED_RECOMP_IOS_CODE_SIGN_STYLE "Automatic" CACHE STRING "iOS code sign style (Automatic or Manual)")
+set(UNLEASHED_RECOMP_IOS_PROVISIONING_PROFILE_SPECIFIER "" CACHE STRING "Provisioning profile specifier for iOS signing")
+option(UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING "Enable code signing for iOS builds" ON)
+option(UNLEASHED_RECOMP_IOS_LOW_MEM_INSTALLER "Load fewer installer textures on iOS to reduce memory usage" ON)
+
+if (UNLEASHED_RECOMP_IOS AND NOT UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM)
+    if (DEFINED ENV{DEVELOPMENT_TEAM} AND NOT "$ENV{DEVELOPMENT_TEAM}" STREQUAL "")
+        set(UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM "$ENV{DEVELOPMENT_TEAM}" CACHE STRING "Apple Development Team ID for iOS signing" FORCE)
+    elseif (DEFINED ENV{APPLE_DEVELOPMENT_TEAM} AND NOT "$ENV{APPLE_DEVELOPMENT_TEAM}" STREQUAL "")
+        set(UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM "$ENV{APPLE_DEVELOPMENT_TEAM}" CACHE STRING "Apple Development Team ID for iOS signing" FORCE)
+    endif()
+endif()
 
 if (WIN32)
     option(UNLEASHED_RECOMP_D3D12 "Add D3D12 support for rendering" ON)
@@ -78,9 +90,12 @@ else()
 endif()
 
 add_compile_definitions(
-    SDL_MAIN_HANDLED
     _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR # Microsoft wtf?
     _CRT_SECURE_NO_WARNINGS)
+
+if (NOT UNLEASHED_RECOMP_IOS)
+    add_compile_definitions(SDL_MAIN_HANDLED)
+endif()
 
 set(UNLEASHED_RECOMP_PRECOMPILED_HEADERS
     "stdafx.h"
@@ -181,6 +196,10 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
     "ui/options_menu_thumbnails.cpp"
     "ui/tv_static.cpp"
 )
+
+if (UNLEASHED_RECOMP_IOS)
+    list(APPEND UNLEASHED_RECOMP_UI_CXX_SOURCES "ui/ios_file_picker.mm")
+endif()
 
 set(UNLEASHED_RECOMP_INSTALL_CXX_SOURCES
     "install/installer.cpp"
@@ -376,6 +395,10 @@ elseif (UNLEASHED_RECOMP_IOS)
 
     add_executable(UnleashedRecomp MACOSX_BUNDLE ${UNLEASHED_RECOMP_CXX_SOURCES})
 
+    set(UNLEASHED_RECOMP_IOS_ASSET_CATALOG ${CMAKE_CURRENT_SOURCE_DIR}/res/ios/Assets.xcassets)
+    set_source_files_properties(${UNLEASHED_RECOMP_IOS_ASSET_CATALOG} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(UnleashedRecomp PRIVATE ${UNLEASHED_RECOMP_IOS_ASSET_CATALOG})
+
     set(UNLEASHED_RECOMP_IOS_XCODE_PROPS
         OUTPUT_NAME "Unleashed Recompiled"
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/res/ios/Info.plist.in
@@ -385,21 +408,37 @@ elseif (UNLEASHED_RECOMP_IOS)
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${IOS_BUNDLE_VERSION}
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${UNLEASHED_RECOMP_IOS_BUNDLE_ID}
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon
+        XCODE_ATTRIBUTE_CODE_SIGN_STYLE ${UNLEASHED_RECOMP_IOS_CODE_SIGN_STYLE}
         XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
         XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
         XCODE_ATTRIBUTE_ENABLE_BITCODE "NO"
     )
 
-    if (UNLEASHED_RECOMP_IOS_CODE_SIGN_IDENTITY)
+    if (NOT UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING)
+        list(APPEND UNLEASHED_RECOMP_IOS_XCODE_PROPS
+            XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+            XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO"
+        )
+    endif()
+
+    if (UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING AND UNLEASHED_RECOMP_IOS_CODE_SIGN_IDENTITY)
         list(APPEND UNLEASHED_RECOMP_IOS_XCODE_PROPS
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ${UNLEASHED_RECOMP_IOS_CODE_SIGN_IDENTITY}
         )
     endif()
 
-    if (UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM)
+    if (UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING AND UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM)
         list(APPEND UNLEASHED_RECOMP_IOS_XCODE_PROPS
             XCODE_ATTRIBUTE_DEVELOPMENT_TEAM ${UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM}
+        )
+    elseif (UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING)
+        message(WARNING "iOS code signing is enabled but UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM is not set. If 'Gather provisioning inputs' fails, set -DUNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM=<TEAM_ID> or disable signing with -DUNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING=OFF.")
+    endif()
+
+    if (UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING AND UNLEASHED_RECOMP_IOS_PROVISIONING_PROFILE_SPECIFIER)
+        list(APPEND UNLEASHED_RECOMP_IOS_XCODE_PROPS
+            XCODE_ATTRIBUTE_PROVISIONING_PROFILE_SPECIFIER ${UNLEASHED_RECOMP_IOS_PROVISIONING_PROFILE_SPECIFIER}
         )
     endif()
 
@@ -407,7 +446,10 @@ elseif (UNLEASHED_RECOMP_IOS)
         ${UNLEASHED_RECOMP_IOS_XCODE_PROPS}
     )
 
-    target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS)
+    target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS UNLEASHED_RECOMP_IOS_INSTALLER_PNGS)
+    if (UNLEASHED_RECOMP_IOS_LOW_MEM_INSTALLER)
+        target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS_LOW_MEM_INSTALLER)
+    endif()
 else()
     add_executable(UnleashedRecomp ${UNLEASHED_RECOMP_CXX_SOURCES})
 endif()
@@ -473,6 +515,10 @@ target_link_libraries(UnleashedRecomp PRIVATE
     CURL::libcurl
     plume
 )
+
+if (TARGET SDL2::SDL2main)
+    target_link_libraries(UnleashedRecomp PRIVATE SDL2::SDL2main)
+endif()
 
 if (TARGET nfd::nfd)
     target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_HAS_NFD)
@@ -594,6 +640,14 @@ BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/in
 BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/install_006.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/install_006.dds" ARRAY_NAME "g_install_006" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/install_007.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/install_007.dds" ARRAY_NAME "g_install_007" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/install_008.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/install_008.dds" ARRAY_NAME "g_install_008" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/raw/install_001.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/raw/install_001.png" ARRAY_NAME "g_install_001_png" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/raw/install_002.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/raw/install_002.png" ARRAY_NAME "g_install_002_png" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/raw/install_003.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/raw/install_003.png" ARRAY_NAME "g_install_003_png" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/raw/install_004.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/raw/install_004.png" ARRAY_NAME "g_install_004_png" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/raw/install_005.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/raw/install_005.png" ARRAY_NAME "g_install_005_png" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/raw/install_006.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/raw/install_006.png" ARRAY_NAME "g_install_006_png" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/raw/install_007.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/raw/install_007.png" ARRAY_NAME "g_install_007_png" COMPRESSION_TYPE "zstd")
+BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/raw/install_008.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/raw/install_008.png" ARRAY_NAME "g_install_008_png" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/miles_electric_icon.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/miles_electric_icon.dds" ARRAY_NAME "g_miles_electric_icon" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ UnleashedRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/installer/pulse_install.dds" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/installer/pulse_install.dds" ARRAY_NAME "g_pulse_install" COMPRESSION_TYPE "zstd")
 

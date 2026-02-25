@@ -27,6 +27,7 @@ struct GuestThreadParams
     uint32_t function;
     uint32_t value;
     uint32_t flags;
+    uint32_t stackSize = 0;
 };
 
 struct GuestThreadHandle : KernelObject
