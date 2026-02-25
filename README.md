@@ -480,7 +480,7 @@ The team behind Unleashed Recompiled does not currently have any plans to port m
 
 - [NextinHKRY](https://github.com/NextinMono): Aided in researching the game's internals and creating concept art for some options menu thumbnails used in the final release. Provided Italian localization for the custom menus.
 
-- [NerunSmarts] (https://github.com/NerunSmarts): Added support for building to iOS, and fixed *most* issues resulting from that including textures and file management.
+- [NerunSmarts](https://github.com/NerunSmarts): Added support for building to iOS, and fixed *most* issues resulting from that including textures and file management.
 
 - [LadyLunanova](https://linktr.ee/ladylunanova): Artist behind the achievement trophy sprite and the keyboard and mouse icons used in the installer wizard. 
 
