@@ -50,7 +50,7 @@ You can also find the equivalent packages for your preferred distro.
 > [!NOTE]
 > This list may not be comprehensive for your particular distro and you may be required to install additional packages, should an error occur during configuration.
 
-### macOS
+### macOS / iOS
 You will need to install Xcode 16.3+ or the equivalent Xcode Command Line Tools from Apple.
 
 The following commands will install additional required dependencies, depending on which package manager you use.
@@ -119,11 +119,11 @@ open -a UnleashedRecomp.app
 ### iOS (experimental)
 1. Configure the project with the iOS preset.
 ```bash
-cmake . --preset ios-debug
+cmake . --preset ios-xcode-debug
 ```
 
 > [!NOTE]
-> The available presets are `ios-debug`, `ios-relwithdebinfo` and `ios-release`.
+> The available presets are `ios-xcode-debug` and `ios-xcode-release`.
 
 2. Build the target.
 ```bash
@@ -132,7 +132,7 @@ cmake --build ./out/build/ios-debug --target UnleashedRecomp
 
 3. Open the generated Xcode project/build output for signing and deployment to a device.
 
-### iOS with Xcode (device install)
+### iOS with Xcode (device install) (recommended)
 1. Configure with the Xcode generator preset.
 ```bash
 cmake . --preset ios-xcode-debug \
@@ -149,22 +149,7 @@ open ./out/build/ios-xcode-debug/UnleashedRecomp.xcodeproj
 
 4. If needed, adjust signing under **Signing & Capabilities** (Automatic signing is enabled by CMake).
 
+5. To build to an IPA, use the Archive feature in Xcode.
+
 > [!IMPORTANT]
 > Current iOS support is experimental and uses pre-generated recompilation/resource artifacts during cross-builds (host-side recompilers and desktop-native file pickers are skipped).
-
-### iOS (Work in Progress)
-1. Configure the project using CMake by navigating to the repository and running one of the iOS presets.
-```bash
-cmake . --preset ios-debug
-```
-
-> [!NOTE]
-> The available presets are `ios-debug`, `ios-relwithdebinfo` and `ios-release`.
-
-2. Build the project using the selected configuration.
-```bash
-cmake --build ./out/build/ios-debug --target UnleashedRecomp
-```
-
-> [!IMPORTANT]
-> iOS support is currently under active porting and desktop-specific features are intentionally disabled there (for example native desktop file picker integration).

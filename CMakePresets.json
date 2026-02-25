@@ -238,9 +238,9 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_INTERPROCEDURAL_OPTIMIZATION": false,
-                "CMAKE_C_FLAGS_RELEASE": "-O1 -g",
-                "CMAKE_CXX_FLAGS_RELEASE": "-O1 -g",
-                "CMAKE_XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL": "1"
+                "CMAKE_C_FLAGS_RELEASE": "-O2 -g",
+                "CMAKE_CXX_FLAGS_RELEASE": "-O2 -g",
+                "CMAKE_XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL": "2"
             }
         }
     ]

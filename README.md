@@ -4,7 +4,7 @@
 
 ---
 
-Unleashed Recompiled is an unofficial PC port of the Xbox 360 version of Sonic Unleashed created through the process of static recompilation. The port offers Windows and Linux support with numerous built-in enhancements such as high resolutions, ultrawide support, high frame rates, improved performance and modding.
+Unleashed Recompiled is an unofficial PC port of the Xbox 360 version of Sonic Unleashed created through the process of static recompilation. The port offers Windows, Linux, macOS and iOS support with numerous built-in enhancements such as high resolutions, ultrawide support, high frame rates, improved performance and modding.
 
 **This project does not include any game assets. You must provide the files from your own legally acquired copy of the game to install or build Unleashed Recompiled.**
 
@@ -28,15 +28,20 @@ Unleashed Recompiled is an unofficial PC port of the Xbox 360 version of Sonic U
 - CPU with support for the AVX instruction set:
   - Intel: Sandy Bridge (Intel Core 2nd Generation)
   - AMD: Bulldozer (AMD FX series)
+  - Apple: tested on A16 Bionic, may support older.
 - GPU with support for Direct3D 12.0 (Shader Model 6) or Vulkan 1.2:
   - NVIDIA: GeForce GT 630 (Kepler)
   - AMD: Radeon HD 7750 (2012, not the RX 7000)
   - Intel: HD Graphics 510 (Skylake)
+  - Apple: A16 Bionic (iPhone 14 Pro) for 61% resolution scale @ 30-60FPS
 - Memory:
   - 8 GB minimum
+  - 4 GB for iOS, recommend 6.
 - Operating System:
   - Windows 10 (version 1909)
   - A modern Linux distro such as Ubuntu 22.04 LTS
+  - macOS 13.0
+  - iOS 15.0
 - Storage:
   - With DLC: 10 GiB required
   - Without DLC: 6 GiB required
@@ -150,7 +155,7 @@ Support for the D-Pad has been added to various parts of the game, allowing the 
 If you have a DualShock 4 or DualSense controller, the LED will dynamically change color depending on the game context and support for the touchpad has been added to the World Map, allowing you to spin the planet freely!
 
 > [!NOTE]
-> LED and touchpad support for the DualShock 4 and DualSense controllers may be limited when using third-party input translation layers (such as DS4Windows or Steam Input).
+> LED and touchpad support for the DualShock 4 and DualSense controllers may be limited when using third-party input translation layers (such as DS4Windows or Steam Input). If you're using iOS, this is untested.
 >
 > Support for both features may also be limited on Linux.
 
@@ -279,6 +284,16 @@ Due to some restrictions of how the desktop environment on the Steam Deck works 
 
 Simply booting at least once in Desktop Mode will enable the Deck to use the file picker when going back to Game Mode. You can complete the entire installation process while in Desktop Mode to save yourself the trouble of browsing through Game Mode if necessary.
 
+### Broken Textures on iOS
+
+This is a hardware issue with iOS not supporting BC7 textures. Every time you encounter a texture that the game can't decode, it will dump it to UnleashedRecomp/bc7_dump, named after the hash of the texture. If you go to a tool like NVIDIA Texture Tools Exporter and convert it to a format such as BC3, you can put it in UnleashedRecomp/bc7_override and it will then load the texture from there.
+
+### iOS Build Crashing after long playtime/exiting to menu and returning to gameplay a few times
+
+This is an issue with how memory management is handled on iOS, basically the game can't free memory properly and memory usage grows over time, with the problem being made FAR worse while running with a debugger. For most gameplay, this shouldn't be an issue as it doesn't grow very fast unless the gameplay state is loaded multiple times.
+
+Why it grows even faster on a debugger, I have no clue. If you can figure it out, please submit a PR.
+
 ## FAQ
 
 ### Do you have a website or Discord server?
@@ -341,12 +356,18 @@ Refer to the left column of [this enum template](https://github.com/hedge-dev/Un
 
 *The default keyboard layout is based on Devil's Details' keyboard layout for Sonic Generations (2011)*.
 
+### I can't do anything on iOS, what are the controls?
+
+Currently, there are no touch controls for iOS implemented outside of the installer. If you'd like them, please make an issue if there's not one already and I can probably add some basic ones, but for now I'll be moving on to another project so a controller is REQUIRED.
+
 ### Where is the save data and configuration file stored?
 
 The save data and configuration files are stored at the following locations:
 
 - Windows: `%APPDATA%\UnleashedRecomp\`
 - Linux: `~/.config/UnleashedRecomp/`
+- macOS: `~/Library/Application Support/UnleashedRecomp/`
+- iOS: `On My iPhone/Unleashed/UnleashedRecomp/`
 
 You will find the save data under the `save` folder (or `mlsave`, if using Hedge Mod Manager's save file redirection). The configuration file is named `config.toml`.
 
@@ -452,6 +473,8 @@ The team behind Unleashed Recompiled does not currently have any plans to port m
 
 - [NextinHKRY](https://github.com/NextinMono): Aided in researching the game's internals and creating concept art for some options menu thumbnails used in the final release. Provided Italian localization for the custom menus.
 
+- [NerunSmarts] (https://github.com/NerunSmarts): Added support for building to iOS, and fixed *most* issues resulting from that including textures and file management.
+
 - [LadyLunanova](https://linktr.ee/ladylunanova): Artist behind the achievement trophy sprite and the keyboard and mouse icons used in the installer wizard. 
 
 - [LJSTAR](https://github.com/LJSTARbird): Artist behind the project logo, along with several thumbnail designs used in the options menu and created new icons for the button guide for opening the achievements menu. Provided French localization for the custom menus.
@@ -478,3 +501,5 @@ The team behind Unleashed Recompiled does not currently have any plans to port m
 - [ocornut](https://github.com/ocornut): Creator of [Dear ImGui](https://github.com/ocornut/imgui), which is used as the backbone of the custom menus.
 
 - Raymond Chen: Useful resources on Windows application development with his blog ["The Old New Thing"](https://devblogs.microsoft.com/oldnewthing/).
+
+- [Loganbogan9](https://github.com/Loganbogan9): Inspired the iOS port. Happy birthday buddy, hope you enjoy the present. -[NerunSmarts](https://github.com/NerunSmarts)
