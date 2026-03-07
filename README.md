@@ -8,6 +8,8 @@ Unleashed Recompiled is an unofficial PC port of the Xbox 360 version of Sonic U
 
 **This project does not include any game assets. You must provide the files from your own legally acquired copy of the game to install or build Unleashed Recompiled.**
 
+**Also, PLEASE DO NOT REPORT ISSUES YOU HAVE WITH THIS BUILD TO THE ORIGINAL UNLEASHED RECOMP REPO! I don't want to be responsible for issue spam over there.**
+
 [Check out the latest release here](https://github.com/hedge-dev/UnleashedRecomp/releases/latest).
 
 [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) are the main recompilers used for converting the game's original PowerPC code and Xenos shaders into compatible C++ and HLSL code respectively. The development of these recompilers was directly inspired by [N64: Recompiled](https://github.com/N64Recomp/N64Recomp), which was used to create [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
@@ -295,6 +297,10 @@ This is an issue with how memory management is handled on iOS, basically the gam
 Why it grows even faster on a debugger, I have no clue. If you can figure it out, please submit a PR.
 >Update:
 >This may be fixed??? I didn't change anything other than compiling with -O2 but the memory usage without a debugger may have gone away.
+
+### iOS IPA does not work past installer
+
+I genuninely have no clue what's causing this, as the logging just entirely dies but the app doesn't somehow. If you have some clue what the heck is happening with this (I suspect it's something to do with the Metal handoff when the program soft restarts) PLEASE open an issue or a PR.
 
 ## FAQ
 
