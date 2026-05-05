@@ -64,10 +64,12 @@ void KiSystemStartup()
 {
     if (g_memory.base == nullptr)
     {
+        LOGN_ERROR("Failed to reserve the 4 GiB guest memory space.");
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_MemoryAllocationFailed").c_str(), GameWindow::s_pWindow);
         std::_Exit(1);
     }
 
+    LOGFN("Guest memory base: {}", static_cast<void*>(g_memory.base));
     g_userHeap.Init();
 
     const auto gameContent = XamMakeContent(XCONTENTTYPE_RESERVED, "Game");
@@ -368,8 +370,10 @@ int main(int argc, char *argv[])
     if (!PersistentStorageManager::LoadBinary())
         LOGFN_ERROR("Failed to load persistent storage binary... (status code {})", (int)PersistentStorageManager::BinStatus);
 
+    LOGN("Starting guest system initialization.");
     KiSystemStartup();
 
+    LOGFN("Loading module: {}", (const char*)modulePath.u8string().c_str());
     uint32_t entry = LdrLoadModule(modulePath);
     if (entry == 0)
     {
@@ -388,6 +392,7 @@ int main(int argc, char *argv[])
 
     Video::StartPipelinePrecompilation();
 
+    LOGFN("Starting guest thread at entry: 0x{:08X}", entry);
     GuestThread::Start({ entry, 0, 0 });
 
     return 0;
