@@ -101,7 +101,7 @@ add_library(UnleashedRecompLib
 
 if (UNLEASHED_RECOMP_IOS)
     target_compile_definitions(UnleashedRecompLib PUBLIC
-        "$<$<CONFIG:Debug>:UNLEASHED_RECOMP_PPC_BOUNDS_CHECK>"
+        UNLEASHED_RECOMP_PPC_BOUNDS_CHECK
     )
 
     target_compile_options(UnleashedRecompLib PRIVATE

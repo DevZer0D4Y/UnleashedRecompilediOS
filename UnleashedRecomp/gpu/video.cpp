@@ -2224,6 +2224,8 @@ void Video::WaitForGPU()
 
 static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5, be<uint32_t>* a6)
 {
+    LOGFN("Guest CreateDevice begin - a1: 0x{:08X}, a2: 0x{:08X}, a3: 0x{:08X}, a4: 0x{:08X}, a5: 0x{:08X}", a1, a2, a3, a4, a5);
+
     g_xdbfTextureCache.clear();
     g_xdbfTextureCacheOwned.clear();
 
@@ -2279,6 +2281,7 @@ static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
 
     *a6 = g_memory.MapVirtual(device);
 
+    LOGFN("Guest CreateDevice end - device: 0x{:08X}", a6->get());
     return 0;
 }
 
@@ -3006,6 +3009,13 @@ static std::atomic<bool> g_executedCommandList;
 
 void Video::Present() 
 {
+    static std::atomic<uint32_t> s_presentLogCount = 0;
+    const uint32_t presentLogIndex = s_presentLogCount.fetch_add(1);
+    const bool logPresent = presentLogIndex < 4;
+
+    if (logPresent)
+        LOGFN("Video::Present begin - index: {}, frame: {}, swapChainValid: {}", presentLogIndex, g_frame, g_swapChainValid);
+
     g_readyForCommands = false;
 
     RenderCommand cmd;
@@ -3024,8 +3034,14 @@ void Video::Present()
         g_shouldPrecompilePipelines = false;
     }
 
+    if (logPresent)
+        LOGFN("Video::Present waiting for command list - index: {}", presentLogIndex);
+
     g_executedCommandList.wait(false);
     g_executedCommandList = false;
+
+    if (logPresent)
+        LOGFN("Video::Present command list completed - index: {}", presentLogIndex);
 
     if (g_swapChainValid)
     {
@@ -3037,6 +3053,9 @@ void Video::Present()
         }
 
         RenderCommandSemaphore* signalSemaphores[] = { g_renderSemaphores[g_frame].get() };
+        if (logPresent)
+            LOGFN("Video::Present presenting swapchain - index: {}, backBufferIndex: {}", presentLogIndex, g_backBufferIndex);
+
         g_swapChainValid = g_swapChain->present(g_backBufferIndex, signalSemaphores, std::size(signalSemaphores));
     }
 
@@ -3093,6 +3112,9 @@ void Video::Present()
     }
 
     g_presentProfiler.Reset();
+
+    if (logPresent)
+        LOGFN("Video::Present end - index: {}, frame: {}, swapChainValid: {}", presentLogIndex, g_frame, g_swapChainValid);
 }
 
 void Video::StartPipelinePrecompilation()

@@ -3,6 +3,7 @@
 #include <kernel/memory.h>
 #include <kernel/heap.h>
 #include <kernel/function.h>
+#include <os/logger.h>
 #include "ppc_context.h"
 
 constexpr size_t PCR_SIZE = 0xAB0;
@@ -85,7 +86,9 @@ static void GuestThreadFunc(GuestThreadHandle* hThread)
 {
 #endif
     hThread->suspended.wait(true);
+    LOGFN("GuestThreadFunc begin - function: 0x{:08X}, value: 0x{:08X}, flags: 0x{:08X}", hThread->params.function, hThread->params.value, hThread->params.flags);
     GuestThread::Start(hThread->params);
+    LOGFN("GuestThreadFunc end - function: 0x{:08X}", hThread->params.function);
 #ifdef USE_PTHREAD
     return nullptr;
 #endif
@@ -101,9 +104,11 @@ GuestThreadHandle::GuestThreadHandle(const GuestThreadParams& params)
     const auto ret = pthread_create(&thread, &attr, GuestThreadFunc, this);
     pthread_attr_destroy(&attr);
     if (ret != 0) {
-        fprintf(stderr, "pthread_create failed with error code 0x%X.\n", ret);
+        LOGFN_ERROR("pthread_create failed with error code 0x{:X}.", ret);
         return;
     }
+
+    LOGFN("GuestThreadHandle created - function: 0x{:08X}, value: 0x{:08X}, flags: 0x{:08X}, threadId: 0x{:08X}", params.function, params.value, params.flags, GetThreadId());
 }
 #else
       , thread(GuestThreadFunc, this)
@@ -158,11 +163,15 @@ uint32_t GuestThread::Start(const GuestThreadParams& params)
     const auto procMask = (uint8_t)(params.flags >> 24);
     const auto cpuNumber = procMask == 0 ? 0 : 7 - std::countl_zero(procMask);
 
+    LOGFN("GuestThread::Start begin - function: 0x{:08X}, value: 0x{:08X}, flags: 0x{:08X}, cpu: {}", params.function, params.value, params.flags, cpuNumber);
     GuestThreadContext ctx(cpuNumber);
     ctx.ppcContext.r3.u64 = params.value;
 
-    g_memory.FindFunction(params.function)(ctx.ppcContext, g_memory.base);
+    auto* function = g_memory.FindFunction(params.function);
+    LOGFN("GuestThread::Start resolved host function - guest: 0x{:08X}, host: {}", params.function, reinterpret_cast<void*>(function));
+    function(ctx.ppcContext, g_memory.base);
 
+    LOGFN("GuestThread::Start end - function: 0x{:08X}, r3: 0x{:08X}", params.function, ctx.ppcContext.r3.u32);
     return ctx.ppcContext.r3.u32;
 }
 
