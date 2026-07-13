@@ -1,6 +1,9 @@
 #pragma once
 
 #include <filesystem>
+#include <fstream>
+#include <limits>
+#include <vector>
 
 #include "virtual_file_system.h"
 
@@ -15,18 +18,39 @@ struct DirectoryFileSystem : VirtualFileSystem
         name = (const char *)(directoryPath.filename().u8string().data());
     }
 
-    bool load(const std::string &path, uint8_t *fileData, size_t fileDataMaxByteCount) const override
+    bool stream(const std::string& path, const StreamCallback& callback) const override
     {
-        std::ifstream fileStream(directoryPath / std::filesystem::path(std::u8string_view((const char8_t *)(path.c_str()))), std::ios::binary);
-        if (fileStream.is_open())
-        {
-            fileStream.read((char *)(fileData), fileDataMaxByteCount);
-            return !fileStream.bad();
-        }
-        else
+        const std::filesystem::path filePath = directoryPath / std::filesystem::path(std::u8string_view((const char8_t *)(path.c_str())));
+        std::error_code ec;
+        const uintmax_t fileSize = std::filesystem::file_size(filePath, ec);
+        if (ec || fileSize == 0 || fileSize > std::numeric_limits<size_t>::max())
         {
             return false;
         }
+
+        std::ifstream fileStream(filePath, std::ios::binary);
+        if (!fileStream.is_open())
+        {
+            return false;
+        }
+
+        constexpr size_t BufferSize = 1024 * 1024;
+        std::vector<uint8_t> buffer(std::min<size_t>(static_cast<size_t>(fileSize), BufferSize));
+        size_t remaining = static_cast<size_t>(fileSize);
+        while (remaining != 0)
+        {
+            const size_t chunkSize = std::min(remaining, buffer.size());
+            fileStream.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(chunkSize));
+            if (static_cast<size_t>(fileStream.gcount()) != chunkSize
+                || !callback(std::span<const uint8_t>(buffer.data(), chunkSize)))
+            {
+                return false;
+            }
+
+            remaining -= chunkSize;
+        }
+
+        return true;
     }
 
     size_t getSize(const std::string &path) const override

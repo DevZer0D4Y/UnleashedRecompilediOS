@@ -50,6 +50,13 @@ using FilePair = std::pair<const char *, uint32_t>;
 
 struct Installer
 {
+    enum class SourceType
+    {
+        Unknown,
+        Game,
+        Update,
+    };
+
     struct Input
     {
         std::filesystem::path gameSource;
@@ -89,6 +96,9 @@ struct Installer
 
     // Convenience method for checking if the specified file contains the update. This should be used when the user selects the file.
     static bool parseUpdate(const std::filesystem::path &sourcePath);
+
+    // Classifies a game or update source with one VFS open and directory scan.
+    static SourceType classifyGameOrUpdate(const std::filesystem::path &sourcePath);
 
     // Convenience method for the installer to check which DLC the file that was specified corresponds to. This should be used when the user selects the file.
     static DLC parseDLC(const std::filesystem::path &sourcePath);

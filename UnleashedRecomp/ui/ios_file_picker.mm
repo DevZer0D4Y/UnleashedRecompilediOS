@@ -6,6 +6,7 @@
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 #import <UIKit/UIKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <objc/runtime.h>
 #include <atomic>
 
@@ -80,6 +81,7 @@ namespace ios_file_picker
         }
 
         [s_activeScopedURLs removeAllObjects];
+        s_activeScopedURLs = nil;
     }
 
     static bool IsTrackingScopedURL(NSURL* url)
@@ -111,6 +113,14 @@ namespace ios_file_picker
                 return false;
             }
 
+            struct PickerInFlightReset
+            {
+                ~PickerInFlightReset()
+                {
+                    s_pickerInFlight.store(false);
+                }
+            } pickerInFlightReset;
+
             __block BOOL finished = NO;
             __block BOOL cancelled = NO;
             __block NSError* pickerError = nil;
@@ -137,13 +147,16 @@ namespace ios_file_picker
                     return;
                 }
 
-                NSArray<NSString*>* documentTypes = folderMode ? @[@"public.folder"] : @[@"public.data"];
-                UIDocumentPickerViewController* picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:documentTypes inMode:UIDocumentPickerModeOpen];
+                NSArray<UTType*>* contentTypes = folderMode ? @[UTTypeFolder] : @[UTTypeData];
+                UIDocumentPickerViewController* picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:contentTypes asCopy:NO];
                 picker.allowsMultipleSelection = YES;
 
                 RecompDocumentPickerDelegate* delegate = [RecompDocumentPickerDelegate new];
                 delegate.completion = ^(NSArray<NSURL*>* urls, NSError* error, BOOL wasCancelled)
                 {
+                    if (finished)
+                        return;
+
                     selectedURLs = urls != nil ? [urls copy] : @[];
                     pickerError = error;
                     cancelled = wasCancelled;
@@ -173,20 +186,17 @@ namespace ios_file_picker
             if (pickerError != nil)
             {
                 outError = [[pickerError localizedDescription] UTF8String];
-                s_pickerInFlight.store(false);
                 return false;
             }
 
             if (cancelled)
             {
-                s_pickerInFlight.store(false);
                 return true;
             }
 
             if (selectedURLs != nil && ![selectedURLs isKindOfClass:[NSArray class]])
             {
                 outError = "Document picker returned invalid selection data.";
-                s_pickerInFlight.store(false);
                 return false;
             }
 
@@ -200,10 +210,6 @@ namespace ios_file_picker
                 NSURL* url = (NSURL*)pickedObject;
                 if (url == nil)
                     continue;
-
-                BOOL startedScopedAccess = [url startAccessingSecurityScopedResource];
-                if (startedScopedAccess && !IsTrackingScopedURL(url))
-                    [s_activeScopedURLs addObject:url];
 
                 NSURL* fileURL = url;
                 if (![fileURL isFileURL])
@@ -226,6 +232,11 @@ namespace ios_file_picker
 
                 if (path != nil && path.length > 0)
                 {
+                    // Starting access is reference counted. Do not start it again for a URL
+                    // that remains active from an earlier selection in this installer session.
+                    if (!IsTrackingScopedURL(url) && [url startAccessingSecurityScopedResource])
+                        [s_activeScopedURLs addObject:url];
+
                     outPaths.emplace_back(std::filesystem::path([path UTF8String]));
                     foundValidPath = true;
                 }
@@ -234,24 +245,20 @@ namespace ios_file_picker
             if (!foundValidPath && selectedURLArray.count > 0)
             {
                 outError = "Document picker returned items without usable local file paths. Try selecting a local file under 'On My iPhone' and ensure the file is fully downloaded.";
-                s_pickerInFlight.store(false);
                 return false;
             }
 
             if (!foundValidPath && selectedURLArray.count == 0)
             {
-                s_pickerInFlight.store(false);
                 return true;
             }
 
             if (outPaths.empty())
             {
                 outError = "No readable file paths were returned by the picker.";
-                s_pickerInFlight.store(false);
                 return false;
             }
 
-            s_pickerInFlight.store(false);
             return true;
         }
     }

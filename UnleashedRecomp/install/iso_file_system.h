@@ -27,7 +27,7 @@ struct ISOFileSystem : VirtualFileSystem
     std::string name;
 
     ISOFileSystem(const std::filesystem::path &isoPath);
-    bool load(const std::string &path, uint8_t *fileData, size_t fileDataMaxByteCount) const override;
+    bool stream(const std::string& path, const StreamCallback& callback) const override;
     size_t getSize(const std::string &path) const override;
     bool exists(const std::string &path) const override;
     const std::string &getName() const override;

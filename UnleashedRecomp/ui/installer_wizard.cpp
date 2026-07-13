@@ -21,6 +21,9 @@
 #include <sdl_listener.h>
 #include <ui/ios_file_picker.h>
 
+#include <exception>
+#include <optional>
+
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -118,6 +121,7 @@ static double g_appearTime = 0.0;
 static double g_disappearTime = DBL_MAX;
 static bool g_isDisappearing = false;
 static bool g_isQuitting = false;
+static bool g_fadingOutMusic = false;
 
 static std::filesystem::path g_installPath;
 static std::filesystem::path g_gameSourcePath;
@@ -155,6 +159,15 @@ enum class WizardPage
     InstallFailed,
 };
 
+struct PickerParseResult
+{
+    std::filesystem::path gameSource;
+    std::filesystem::path updateSource;
+    std::array<std::filesystem::path, int(DLC::Count)> dlcSources;
+    std::list<std::filesystem::path> failedPaths;
+    bool failedPathLimitExceeded = false;
+};
+
 enum class MessagePromptSource
 {
     Unknown,
@@ -170,12 +183,14 @@ static bool g_currentMessagePromptConfirmation = false;
 static std::list<std::filesystem::path> g_currentPickerResults;
 static std::atomic<bool> g_currentPickerResultsReady = false;
 static std::string g_currentPickerErrorMessage;
+static std::optional<PickerParseResult> g_currentPickerParseResult;
 static std::unique_ptr<std::thread> g_currentPickerThread;
 static bool g_pickerTutorialCleared[2] = {};
 static bool g_pickerTutorialTriggered = false;
 static bool g_pickerTutorialFolderMode = false;
 static bool g_currentPickerVisible = false;
 static bool g_currentPickerFolderMode = false;
+static WizardPage g_currentPickerPage = WizardPage::SelectGameAndUpdate;
 static int g_currentMessageResult = -1;
 static ImVec2 g_joypadAxis = {};
 static int g_currentCursorIndex = -1;
@@ -1180,43 +1195,55 @@ static bool ConvertPathSet(const nfdpathset_t *pathSet, std::list<std::filesyste
 }
 #endif
 
+static PickerParseResult ParseSourcePaths(const std::list<std::filesystem::path>& paths, WizardPage page);
+
 static void PickerThreadProcess()
 {
+    try
+    {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-    if (!ios_file_picker::PickPaths(g_currentPickerFolderMode, g_currentPickerResults, g_currentPickerErrorMessage))
-    {
-        if (g_currentPickerErrorMessage.empty())
+        const bool pickerSucceeded = ios_file_picker::PickPaths(g_currentPickerFolderMode, g_currentPickerResults, g_currentPickerErrorMessage);
+        if (!pickerSucceeded && g_currentPickerErrorMessage.empty())
             g_currentPickerErrorMessage = Localise("Installer_Message_FilePickerTutorial");
-    }
 
-    g_currentPickerResultsReady = true;
+        if (pickerSucceeded && g_currentPickerErrorMessage.empty() && !g_currentPickerResults.empty())
+            g_currentPickerParseResult = ParseSourcePaths(g_currentPickerResults, g_currentPickerPage);
 #elif defined(UNLEASHED_RECOMP_HAS_NFD)
-    const nfdpathset_t *pathSet;
-    nfdresult_t result = NFD_ERROR;
-    if (g_currentPickerFolderMode)
-    {
-        result = NFD_PickFolderMultipleN(&pathSet, nullptr);
+        const nfdpathset_t *pathSet;
+        nfdresult_t result = NFD_ERROR;
+        if (g_currentPickerFolderMode)
+        {
+            result = NFD_PickFolderMultipleN(&pathSet, nullptr);
+        }
+        else
+        {
+            result = NFD_OpenDialogMultipleN(&pathSet, nullptr, 0, nullptr);
+        }
+
+        if (result == NFD_OKAY)
+        {
+            if (!ConvertPathSet(pathSet, g_currentPickerResults))
+                g_currentPickerErrorMessage = "The selected paths could not be read.";
+            NFD_PathSet_Free(pathSet);
+        }
+        else if (result == NFD_ERROR)
+        {
+            g_currentPickerErrorMessage = NFD_GetError();
+        }
+#else
+        g_currentPickerErrorMessage = Localise("Installer_Message_FilePickerTutorial");
+#endif
     }
-    else
+    catch (const std::exception& exception)
     {
-        result = NFD_OpenDialogMultipleN(&pathSet, nullptr, 0, nullptr);
+        g_currentPickerErrorMessage = fmt::format("File selection failed: {}", exception.what());
     }
-    
-    if (result == NFD_OKAY)
+    catch (...)
     {
-        bool pathsConverted = ConvertPathSet(pathSet, g_currentPickerResults);
-        NFD_PathSet_Free(pathSet);
-    }
-    else if (result == NFD_ERROR)
-    {
-        g_currentPickerErrorMessage = NFD_GetError();
+        g_currentPickerErrorMessage = "File selection failed unexpectedly.";
     }
 
-    g_currentPickerResultsReady = true;
-#else
-    g_currentPickerErrorMessage = Localise("Installer_Message_FilePickerTutorial");
-    g_currentPickerResultsReady = true;
-#endif
+    g_currentPickerResultsReady.store(true, std::memory_order_release);
 }
 
 static void PickerStart(bool folderMode) {
@@ -1227,12 +1254,15 @@ static void PickerStart(bool folderMode) {
     }
 
     g_currentPickerResults.clear();
+    g_currentPickerErrorMessage.clear();
+    g_currentPickerParseResult.reset();
     g_currentPickerFolderMode = folderMode;
-    g_currentPickerResultsReady = false;
+    g_currentPickerPage = g_currentPage;
+    g_currentPickerResultsReady.store(false, std::memory_order_relaxed);
     g_currentPickerVisible = true;
 
     // Optional single thread mode for testing on systems that do not interact well with the separate thread being used for NFD.
-#ifdef __APPLE__
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
     constexpr bool singleThreadMode = true;
 #else
     constexpr bool singleThreadMode = false;
@@ -1240,7 +1270,17 @@ static void PickerStart(bool folderMode) {
     if (singleThreadMode)
         PickerThreadProcess();
     else
-        g_currentPickerThread = std::make_unique<std::thread>(PickerThreadProcess);
+    {
+        try
+        {
+            g_currentPickerThread = std::make_unique<std::thread>(PickerThreadProcess);
+        }
+        catch (const std::exception& exception)
+        {
+            g_currentPickerErrorMessage = fmt::format("Unable to start file selection: {}", exception.what());
+            g_currentPickerResultsReady.store(true, std::memory_order_release);
+        }
+    }
 }
 
 static void PickerShow(bool folderMode)
@@ -1258,94 +1298,85 @@ static void PickerShow(bool folderMode)
     }
 }
 
-static bool ParseSourcePaths(std::list<std::filesystem::path> &paths)
+static PickerParseResult ParseSourcePaths(const std::list<std::filesystem::path>& paths, WizardPage page)
 {
-    assert((g_currentPage == WizardPage::SelectGameAndUpdate) || (g_currentPage == WizardPage::SelectDLC));
+    assert((page == WizardPage::SelectGameAndUpdate) || (page == WizardPage::SelectDLC));
 
     constexpr size_t failedPathLimit = 5;
-    bool isFailedPathsOverLimit = false;
-    std::list<std::filesystem::path> failedPaths;
-    if (g_currentPage == WizardPage::SelectGameAndUpdate)
+    PickerParseResult result;
+    if (page == WizardPage::SelectGameAndUpdate)
     {
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-        auto toLowerString = [](std::string value)
-        {
-            std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-            return value;
-        };
-
         for (const std::filesystem::path &path : paths)
         {
-            std::error_code ec;
-            bool isDirectory = std::filesystem::is_directory(path, ec);
-            std::string extension = toLowerString(path.extension().string());
-            bool looksLikeGameSource = (extension == ".iso") || isDirectory;
-
-            if (looksLikeGameSource || g_gameSourcePath.empty())
+            const Installer::SourceType sourceType = Installer::classifyGameOrUpdate(path);
+            if (sourceType == Installer::SourceType::Game)
             {
-                g_gameSourcePath = path;
+                result.gameSource = path;
+            }
+            else if (sourceType == Installer::SourceType::Update)
+            {
+                result.updateSource = path;
+            }
+            else if (result.failedPaths.size() < failedPathLimit)
+            {
+                result.failedPaths.push_back(path);
             }
             else
             {
-                g_updateSourcePath = path;
+                result.failedPathLimitExceeded = true;
             }
         }
-#else
-        for (const std::filesystem::path &path : paths)
-        {
-            if (Installer::parseGame(path))
-            {
-                g_gameSourcePath = path;
-            }
-            else if (Installer::parseUpdate(path))
-            {
-                g_updateSourcePath = path;
-            }
-            else if (failedPaths.size() < failedPathLimit)
-            {
-                failedPaths.push_back(path);
-            }
-            else
-            {
-                isFailedPathsOverLimit = true;
-            }
-        }
-#endif
     }
-    else if(g_currentPage == WizardPage::SelectDLC)
+    else if (page == WizardPage::SelectDLC)
     {
         for (const std::filesystem::path &path : paths)
         {
             DLC dlc = Installer::parseDLC(path);
             if (dlc != DLC::Unknown)
             {
-                g_dlcSourcePaths[DLCIndex(dlc)] = path;
+                result.dlcSources[DLCIndex(dlc)] = path;
             }
-            else if (failedPaths.size() < failedPathLimit)
+            else if (result.failedPaths.size() < failedPathLimit)
             {
-                failedPaths.push_back(path);
+                result.failedPaths.push_back(path);
             }
         }
     }
 
-    if (!failedPaths.empty())
+    return result;
+}
+
+static bool ApplySourcePaths(const PickerParseResult& result)
+{
+    if (!result.gameSource.empty())
+        g_gameSourcePath = result.gameSource;
+    if (!result.updateSource.empty())
+        g_updateSourcePath = result.updateSource;
+
+    for (size_t i = 0; i < result.dlcSources.size(); ++i)
+    {
+        if (!result.dlcSources[i].empty())
+            g_dlcSourcePaths[i] = result.dlcSources[i];
+    }
+
+    if (!result.failedPaths.empty())
     {
         std::stringstream stringStream;
         stringStream << Localise("Installer_Message_InvalidFilesList") << std::endl;
-        for (const std::filesystem::path &path : failedPaths)
+        for (const std::filesystem::path &path : result.failedPaths)
         {
             std::u8string filenameU8 = path.filename().u8string();
             stringStream << std::endl << "- " << Truncate(std::string(filenameU8.begin(), filenameU8.end()), 32, true, true);
         }
 
-        if (isFailedPathsOverLimit)
+        if (result.failedPathLimitExceeded)
             stringStream << std::endl << "- [...]";
 
         g_currentMessagePrompt = stringStream.str();
         g_currentMessagePromptConfirmation = false;
     }
 
-    return failedPaths.empty();
+    return result.failedPaths.empty();
 }
 
 static void DrawLanguagePicker()
@@ -1445,15 +1476,30 @@ static void DrawInstallingProgress()
 
 static void InstallerThread()
 {
-    if (!Installer::install(g_installerSources, g_installPath, false, g_installerJournal, std::chrono::seconds(1), [&]() {
-        g_installerProgressRatioTarget = float(double(g_installerJournal.progressCounter) / double(g_installerJournal.progressTotal));
+    bool installSucceeded = false;
+    try
+    {
+        installSucceeded = Installer::install(g_installerSources, g_installPath, false, g_installerJournal, std::chrono::seconds(1), [&]() {
+            if (g_installerJournal.progressTotal != 0)
+                g_installerProgressRatioTarget = float(double(g_installerJournal.progressCounter) / double(g_installerJournal.progressTotal));
 
-        // If user is being asked for confirmation on cancelling the installation, halt the installer from progressing further.
-        g_installerHalted.wait(true);
+            // If user is being asked for confirmation on cancelling the installation, halt the installer from progressing further.
+            g_installerHalted.wait(true);
 
-        // If user has confirmed they wish to cancel the installation, return false to indicate the installer should fail and stop.
-        return !g_installerCancelled.load();
-    }))
+            // If user has confirmed they wish to cancel the installation, return false to indicate the installer should fail and stop.
+            return !g_installerCancelled.load();
+        });
+    }
+    catch (const std::exception& exception)
+    {
+        g_installerJournal.lastErrorMessage = fmt::format("Installation failed unexpectedly: {}", exception.what());
+    }
+    catch (...)
+    {
+        g_installerJournal.lastErrorMessage = "Installation failed unexpectedly.";
+    }
+
+    if (!installSucceeded)
     {
         g_installerFailed = true;
         g_installerErrorMessage = g_installerJournal.lastErrorMessage;
@@ -1551,11 +1597,11 @@ static void DrawNavigationButton()
         {
             std::u8string gameNameU8 = g_gameSourcePath.filename().u8string();
             std::u8string updateNameU8 = g_updateSourcePath.filename().u8string();
-            os::logger::Log(fmt::format(
+            LOGF_WARNING(
                 "Installer compatibility check failed (result={}) game='{}' update='{}'",
                 int(patcherResult),
                 std::string(gameNameU8.begin(), gameNameU8.end()),
-                std::string(updateNameU8.begin(), updateNameU8.end())));
+                std::string(updateNameU8.begin(), updateNameU8.end()));
             g_currentMessagePrompt = Localise("Installer_Message_IncompatibleGameData");
             g_currentMessagePromptConfirmation = false;
         }
@@ -1823,28 +1869,39 @@ static void PickerCheckTutorial()
 
 static void PickerCheckResults()
 {
-    if (!g_currentPickerResultsReady)
+    if (!g_currentPickerResultsReady.load(std::memory_order_acquire))
     {
         return;
     }
 
-    if (!g_currentPickerErrorMessage.empty())
+    if (g_currentPickerThread != nullptr)
+    {
+        g_currentPickerThread->join();
+        g_currentPickerThread.reset();
+    }
+
+    const bool pickerFailed = !g_currentPickerErrorMessage.empty();
+    if (pickerFailed)
     {
         g_currentMessagePrompt = g_currentPickerErrorMessage;
         g_currentMessagePromptConfirmation = false;
         g_currentPickerErrorMessage.clear();
     }
 
-    if (!g_currentPickerResults.empty() && ParseSourcePaths(g_currentPickerResults))
+    if (!pickerFailed && !g_currentPickerResults.empty())
     {
-        g_pickerTutorialCleared[g_pickerTutorialFolderMode] = true;
+        if (!g_currentPickerParseResult.has_value())
+            g_currentPickerParseResult = ParseSourcePaths(g_currentPickerResults, g_currentPickerPage);
+
+        if (ApplySourcePaths(*g_currentPickerParseResult))
+            g_pickerTutorialCleared[g_pickerTutorialFolderMode] = true;
     }
 
-    g_currentPickerResultsReady = false;
+    g_currentPickerResults.clear();
+    g_currentPickerParseResult.reset();
+    g_currentPickerResultsReady.store(false, std::memory_order_relaxed);
     g_currentPickerVisible = false;
 }
-
-static bool g_fadingOutMusic;
 
 static void ProcessMusic()
 {
@@ -1865,6 +1922,8 @@ static void ProcessMusic()
 void InstallerWizard::Init()
 {
     auto &io = ImGui::GetIO();
+
+    g_creditsStr.clear();
 
     g_seuratFont = ImFontAtlasSnapshot::GetFont("FOT-SeuratPro-M.otf");
     g_dfsogeistdFont = ImFontAtlasSnapshot::GetFont("DFSoGeiStd-W7.otf");
@@ -1950,6 +2009,12 @@ void InstallerWizard::Draw()
 
 void InstallerWizard::Shutdown()
 {
+    // A cancellation prompt may have suspended the worker. Always release it
+    // before joining so shutdown cannot wait forever on the atomic wait.
+    g_installerCancelled.store(true, std::memory_order_release);
+    g_installerHalted.store(false, std::memory_order_release);
+    g_installerHalted.notify_all();
+
     // Wait for and erase the threads.
     if (g_installerThread != nullptr)
     {
@@ -1963,14 +2028,8 @@ void InstallerWizard::Shutdown()
         g_currentPickerThread.reset();
     }
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-    ios_file_picker::ReleaseAllAccess();
-#endif
-
-    // Erase the sources.
-    g_installerSources.game.reset();
-    g_installerSources.update.reset();
-    g_installerSources.dlc.clear();
+    // Close mapped files and streams before relinquishing security-scoped access.
+    g_installerSources = {};
     
     // Make sure the GPU is not currently active before deleting these textures.
     Video::WaitForGPU();
@@ -1979,23 +2038,51 @@ void InstallerWizard::Shutdown()
     g_milesElectricIcon.reset();
     g_arrowCircle.reset();
     g_pulseInstall.reset();
+    g_upHedgeDev.reset();
 
     for (auto &texture : g_installTextures)
     {
         texture.reset();
     }
+
+    g_creditsStr.clear();
+    g_creditsStr.shrink_to_fit();
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    ios_file_picker::ReleaseAllAccess();
+#endif
 }
 
 bool InstallerWizard::Run(std::filesystem::path installPath, bool skipGame)
 {
-    os::logger::Log(fmt::format("InstallerWizard::Run start - installPath: {}, skipGame: {}", (const char*)installPath.u8string().c_str(), skipGame));
+    LOGF("InstallerWizard::Run start - installPath: {}, skipGame: {}", (const char*)installPath.u8string().c_str(), skipGame);
     g_installPath = installPath;
+    g_firstPage = skipGame ? WizardPage::SelectDLC : WizardPage::SelectLanguage;
+    g_currentPage = g_firstPage;
+    g_appearTime = ImGui::GetTime();
+    g_disappearTime = DBL_MAX;
+    g_isDisappearing = false;
+    g_isQuitting = false;
+    g_fadingOutMusic = false;
+    g_gameSourcePath.clear();
+    g_updateSourcePath.clear();
+    g_dlcSourcePaths.fill({});
+    g_dlcInstalled.fill(false);
+    g_currentMessagePrompt.clear();
+    g_currentMessagePromptSource = MessagePromptSource::Unknown;
+    g_currentMessagePromptConfirmation = false;
+    g_currentMessageResult = -1;
+    g_installerJournal = {};
+    g_installerErrorMessage.clear();
+    g_installerHalted.store(false, std::memory_order_relaxed);
+    g_installerCancelled.store(false, std::memory_order_relaxed);
+    g_installerFinished.store(false, std::memory_order_relaxed);
 
     EmbeddedPlayer::Init();
-    os::logger::Log("InstallerWizard::Run - EmbeddedPlayer::Init completed");
+    LOG("EmbeddedPlayer::Init completed");
 #ifdef UNLEASHED_RECOMP_HAS_NFD
     NFD_Init();
-    os::logger::Log("InstallerWizard::Run - NFD_Init completed");
+    LOG("NFD_Init completed");
 #endif
 
     // Guarantee one controller is initialized. We'll rely on SDL's event loop to get the controller events.
@@ -2008,34 +2095,31 @@ bool InstallerWizard::Run(std::filesystem::path installPath, bool skipGame)
         {
             g_dlcInstalled[i] = Installer::checkDLCInstall(g_installPath, DLC(i + 1));
         }
-
-        g_firstPage = WizardPage::SelectDLC;
-        g_currentPage = g_firstPage;
     }
 
     GameWindow::SetFullscreenCursorVisibility(true);
     s_isVisible = true;
-    os::logger::Log("InstallerWizard::Run - entering wizard loop");
+    LOG("Entering wizard loop");
 
     bool firstFrame = true;
 
     while (s_isVisible)
     {
         if (firstFrame)
-            os::logger::Log("InstallerWizard::Run - first frame: WaitOnSwapChain begin");
+            LOG("First frame: WaitOnSwapChain begin");
         Video::WaitOnSwapChain();
         if (firstFrame)
-            os::logger::Log("InstallerWizard::Run - first frame: WaitOnSwapChain end");
+            LOG("First frame: WaitOnSwapChain end");
         ProcessMusic();
         if (firstFrame)
-            os::logger::Log("InstallerWizard::Run - first frame: ProcessMusic end");
+            LOG("First frame: ProcessMusic end");
         SDL_PumpEvents();
         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
         GameWindow::Update();
         Video::Present();
         if (firstFrame)
         {
-            os::logger::Log("InstallerWizard::Run - first frame: Present end");
+            LOG("First frame: Present end");
             firstFrame = false;
         }
     }
