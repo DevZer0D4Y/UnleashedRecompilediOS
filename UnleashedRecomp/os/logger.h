@@ -7,7 +7,14 @@
 
 // Function-specific logging.
 
+#if defined(UNLEASHED_RECOMP_MINIMAL_LOGGING)
+#define LOG(str)               ((void)0)
+#define LOGF(str, ...)         ((void)0)
+#else
 #define LOG(str)               LOG_IMPL(None, __func__, str)
+#define LOGF(str, ...)         LOGF_IMPL(None, __func__, str, __VA_ARGS__)
+#endif
+
 #define LOG_WARNING(str)       LOG_IMPL(Warning, __func__, str)
 #define LOG_ERROR(str)         LOG_IMPL(Error, __func__, str)
 
@@ -17,7 +24,6 @@
 #define LOG_UTILITY(str)
 #endif
 
-#define LOGF(str, ...)         LOGF_IMPL(None, __func__, str, __VA_ARGS__)
 #define LOGF_WARNING(str, ...) LOGF_IMPL(Warning, __func__, str, __VA_ARGS__)
 #define LOGF_ERROR(str, ...)   LOGF_IMPL(Error, __func__, str, __VA_ARGS__)
 
@@ -29,7 +35,14 @@
 
 // Non-function-specific logging.
 
+#if defined(UNLEASHED_RECOMP_MINIMAL_LOGGING)
+#define LOGN(str)               ((void)0)
+#define LOGFN(str, ...)         ((void)0)
+#else
 #define LOGN(str)               LOG_IMPL(None, "*", str)
+#define LOGFN(str, ...)         LOGF_IMPL(None, "*", str, __VA_ARGS__)
+#endif
+
 #define LOGN_WARNING(str)       LOG_IMPL(Warning, "*", str)
 #define LOGN_ERROR(str)         LOG_IMPL(Error, "*", str)
 
@@ -39,7 +52,6 @@
 #define LOGN_UTILITY(str)
 #endif
 
-#define LOGFN(str, ...)         LOGF_IMPL(None, "*", str, __VA_ARGS__)
 #define LOGFN_WARNING(str, ...) LOGF_IMPL(Warning, "*", str, __VA_ARGS__)
 #define LOGFN_ERROR(str, ...)   LOGF_IMPL(Error, "*", str, __VA_ARGS__)
 
@@ -60,5 +72,7 @@ namespace os::logger
     };
 
     void Init();
+    void Flush();
+    void Shutdown();
     void Log(const std::string_view str, ELogType type = ELogType::None, const char* func = nullptr);
 }

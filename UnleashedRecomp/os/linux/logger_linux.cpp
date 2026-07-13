@@ -32,6 +32,16 @@ void os::logger::Init()
 {
 }
 
+void os::logger::Flush()
+{
+    std::fflush(nullptr);
+}
+
+void os::logger::Shutdown()
+{
+    std::fflush(nullptr);
+}
+
 void os::logger::Log(const std::string_view str, ELogType type, const char* func)
 {
     SafeLogPrint(str, func);

@@ -3,6 +3,7 @@
 #include <gpu/video.h>
 #include <install/installer.h>
 #include <kernel/function.h>
+#include <os/logger.h>
 #include <os/process.h>
 #include <patches/audio_patches.h>
 #include <patches/inspire_patches.h>
@@ -25,6 +26,7 @@ void App::Exit()
     timeEndPeriod(1);
 #endif
 
+    os::logger::Shutdown();
     std::_Exit(0);
 }
 

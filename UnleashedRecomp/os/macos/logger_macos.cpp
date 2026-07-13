@@ -3,7 +3,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <mutex>
 #include <system_error>
 #include <string_view>
 
@@ -11,10 +10,13 @@
 #include <TargetConditionals.h>
 #endif
 
-static std::mutex s_logMutex;
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
+#include <array>
+#include <mutex>
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+static std::mutex s_fileMutex;
 static FILE* s_logFile = nullptr;
+static std::array<char, 64 * 1024> s_logBuffer;
 
 static std::filesystem::path GetIOSLogPath()
 {
@@ -26,54 +28,57 @@ static std::filesystem::path GetIOSLogPath()
 }
 #endif
 
-static void SafeLogPrint(const std::string_view str, const char* func)
+static const char* GetLogPrefix(os::logger::ELogType type)
 {
-    std::lock_guard lock(s_logMutex);
-
-    try
+    switch (type)
     {
-        if (func)
-        {
-            fmt::println("[{}] {}", func, str);
-        }
-        else
-        {
-            fmt::println("{}", str);
-        }
+        case os::logger::ELogType::Utility: return "[utility] ";
+        case os::logger::ELogType::Warning: return "[warning] ";
+        case os::logger::ELogType::Error: return "[error] ";
+        default: return "";
     }
-    catch (...)
-    {
-        if (func)
-        {
-            std::fprintf(stderr, "[%s] %.*s\n", func, static_cast<int>(str.size()), str.data());
-        }
-        else
-        {
-            std::fprintf(stderr, "%.*s\n", static_cast<int>(str.size()), str.data());
-        }
-    }
+}
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+static void PrintLogLine(FILE* output, const std::string_view str, os::logger::ELogType type, const char* func)
+{
+    const char* prefix = GetLogPrefix(type);
+    if (func != nullptr)
+    {
+        std::fprintf(output, "%s[%s] %.*s\n", prefix, func, static_cast<int>(str.size()), str.data());
+    }
+    else
+    {
+        std::fprintf(output, "%s%.*s\n", prefix, static_cast<int>(str.size()), str.data());
+    }
+}
+
+static void SafeLogPrint(const std::string_view str, os::logger::ELogType type, const char* func)
+{
+    FILE* console = type == os::logger::ELogType::Error ? stderr : stdout;
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
+    std::lock_guard lock(s_fileMutex);
+#endif
+
+    PrintLogLine(console, str, type, func);
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
     if (s_logFile != nullptr)
     {
-        if (func)
-        {
-            std::fprintf(s_logFile, "[%s] %.*s\n", func, static_cast<int>(str.size()), str.data());
-        }
-        else
-        {
-            std::fprintf(s_logFile, "%.*s\n", static_cast<int>(str.size()), str.data());
-        }
-
-        std::fflush(s_logFile);
+        PrintLogLine(s_logFile, str, type, func);
+        if (type == os::logger::ELogType::Error)
+            std::fflush(s_logFile);
     }
 #endif
+
+    if (type == os::logger::ELogType::Error)
+        std::fflush(console);
 }
 
 void os::logger::Init()
 {
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-    std::lock_guard lock(s_logMutex);
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
+    std::lock_guard lock(s_fileMutex);
     if (s_logFile != nullptr)
         return;
 
@@ -87,15 +92,40 @@ void os::logger::Init()
     s_logFile = std::fopen(logPath.c_str(), "a");
     if (s_logFile != nullptr)
     {
-        std::setvbuf(s_logFile, nullptr, _IOLBF, 0);
+        std::setvbuf(s_logFile, s_logBuffer.data(), _IOFBF, s_logBuffer.size());
         std::fprintf(s_logFile, "\n--- UnleashedRecomp log start ---\n");
-        std::fflush(s_logFile);
     }
+#endif
+}
+
+void os::logger::Flush()
+{
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
+    std::lock_guard lock(s_fileMutex);
+    if (s_logFile != nullptr)
+        std::fflush(s_logFile);
+#else
+    std::fflush(nullptr);
+#endif
+}
+
+void os::logger::Shutdown()
+{
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
+    std::lock_guard lock(s_fileMutex);
+    if (s_logFile != nullptr)
+    {
+        std::fprintf(s_logFile, "--- UnleashedRecomp log end ---\n");
+        std::fflush(s_logFile);
+        std::fclose(s_logFile);
+        s_logFile = nullptr;
+    }
+#else
+    std::fflush(nullptr);
 #endif
 }
 
 void os::logger::Log(const std::string_view str, ELogType type, const char* func)
 {
-    (void)type;
-    SafeLogPrint(str, func);
+    SafeLogPrint(str, type, func);
 }

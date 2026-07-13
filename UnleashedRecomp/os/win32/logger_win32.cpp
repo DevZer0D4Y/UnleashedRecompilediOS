@@ -1,6 +1,8 @@
 #include <os/logger.h>
 #include <os/process.h>
 
+#include <cstdio>
+
 #define FOREGROUND_WHITE  (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE)
 #define FOREGROUND_YELLOW (FOREGROUND_RED | FOREGROUND_GREEN)
 
@@ -9,6 +11,16 @@ static HANDLE g_hStandardOutput;
 void os::logger::Init()
 {
     g_hStandardOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+}
+
+void os::logger::Flush()
+{
+    std::fflush(nullptr);
+}
+
+void os::logger::Shutdown()
+{
+    std::fflush(nullptr);
 }
 
 void os::logger::Log(const std::string_view str, ELogType type, const char* func)
