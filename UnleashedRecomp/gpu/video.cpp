@@ -36,10 +36,14 @@
 #include <os/process.h>
 
 #include <cstdlib>
+#include <array>
+#include <limits>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
+#if defined(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
 #include <mach/mach.h>
+#endif
 #endif
 
 #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
@@ -353,6 +357,9 @@ static std::unique_ptr<RenderCommandFence> g_copyCommandFence;
 
 static std::unique_ptr<RenderSwapChain> g_swapChain;
 static bool g_swapChainValid;
+static std::atomic<bool> g_videoInitialized = false;
+static std::atomic<bool> g_appActive = true;
+static std::atomic<bool> g_runtimeCacheTrimQueued = false;
 
 static constexpr RenderFormat BACKBUFFER_FORMAT = RenderFormat::B8G8R8A8_UNORM;
 
@@ -1617,6 +1624,12 @@ static void CheckSwapChain()
 {
     static uint64_t s_installerInvalidCounter = 0;
 
+    if (!g_appActive.load(std::memory_order_acquire))
+    {
+        g_swapChainValid = false;
+        return;
+    }
+
     g_swapChain->setVsyncEnabled(Config::VSync);
     const bool needsResize = g_swapChain->needsResize();
 
@@ -1625,12 +1638,14 @@ static void CheckSwapChain()
 
     if (!g_swapChainValid && needsResize)
     {
-        Video::WaitForGPU();
+        if (!g_swapChain->isEmpty())
+            Video::WaitForGPU();
+
         g_backBuffer->framebuffers.clear();
         g_swapChainValid = g_swapChain->resize();
         g_needsResize = g_swapChainValid;
     }
-    else if (!g_swapChainValid)
+    else if (!g_swapChainValid && !g_swapChain->isEmpty())
     {
         // Recover from present/acquire failures that don't require a resize.
         g_swapChainValid = true;
@@ -1648,9 +1663,9 @@ static void CheckSwapChain()
         s_installerInvalidCounter++;
         if ((s_installerInvalidCounter % 120) == 0)
         {
-            os::logger::Log(fmt::format(
+            LOGFN(
                 "CheckSwapChain - still invalid during installer (count: {}, needsResize: {}, swapChainSize: {}x{}, isEmpty: {})",
-                s_installerInvalidCounter, needsResize, g_swapChain->getWidth(), g_swapChain->getHeight(), g_swapChain->isEmpty()));
+                s_installerInvalidCounter, needsResize, g_swapChain->getWidth(), g_swapChain->getHeight(), g_swapChain->isEmpty());
         }
     }
 
@@ -2006,7 +2021,7 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
 
     g_swapChain = g_queue->createSwapChain(GameWindow::s_renderWindow, bufferCount, BACKBUFFER_FORMAT, Config::MaxFrameLatency);
     g_swapChain->setVsyncEnabled(Config::VSync);
-    g_swapChainValid = !g_swapChain->needsResize();
+    g_swapChainValid = !g_swapChain->needsResize() && !g_swapChain->isEmpty();
 
     for (auto& acquireSemaphore : g_acquireSemaphores)
         acquireSemaphore = g_device->createCommandSemaphore();
@@ -2185,6 +2200,7 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
     g_backBuffer->format = BACKBUFFER_FORMAT;
     g_backBuffer->textureHolder = g_device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, BACKBUFFER_FORMAT, RenderTextureFlag::RENDER_TARGET));
 
+    g_videoInitialized.store(true, std::memory_order_release);
     Video::ComputeViewportDimensions();
     CheckSwapChain();
     BeginCommandList();
@@ -2697,7 +2713,7 @@ static void DrawFPS()
     drawList->AddText(font, fontSize, textPos, IM_COL32_WHITE, fmt.c_str());
 }
 
-#if defined(__APPLE__) && TARGET_OS_IOS
+#if defined(__APPLE__) && TARGET_OS_IOS && defined(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
 static uint64_t GetIOSFreeMemoryBytes()
 {
     mach_port_t hostPort = mach_host_self();
@@ -2818,7 +2834,7 @@ static void DrawImGui()
     assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
 
     DrawFPS();
-#if defined(__APPLE__) && TARGET_OS_IOS
+#if defined(__APPLE__) && TARGET_OS_IOS && defined(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
     DrawIOSLowMemoryWarning();
 #endif
     DrawProfiler();
@@ -3043,6 +3059,9 @@ void Video::Present()
     if (logPresent)
         LOGFN("Video::Present command list completed - index: {}", presentLogIndex);
 
+    if (!g_appActive.load(std::memory_order_acquire))
+        g_swapChainValid = false;
+
     if (g_swapChainValid)
     {
         if (g_pendingWaitOnSwapChain)
@@ -3246,14 +3265,15 @@ static void ProcBeginCommandList(const RenderCommand& cmd)
 
 static void ProcTrimRuntimeCaches(const RenderCommand&)
 {
+    g_runtimeCacheTrimQueued.store(false, std::memory_order_release);
     const size_t pipelinesBefore = g_pipelines.size();
 
-    g_pipelines.clear();
+    g_pipelines = {};
 
 #ifdef PSO_CACHING
     {
         std::lock_guard lock(g_pipelineCacheMutex);
-        g_pipelineStatesToCache.clear();
+        g_pipelineStatesToCache = {};
     }
 #endif
 
@@ -3264,20 +3284,46 @@ static void ProcTrimRuntimeCaches(const RenderCommand&)
             continue;
 
         std::lock_guard lock(shader->mutex);
-        shader->linkedShaders.clear();
+        shader->linkedShaders = {};
 #ifdef UNLEASHED_RECOMP_D3D12
-        shader->shaderBlobs.clear();
+        std::vector<ComPtr<IDxcBlob>>().swap(shader->shaderBlobs);
 #endif
     }
 
-    os::logger::Log(fmt::format("TrimRuntimeCaches - pipelines: {} -> 0", pipelinesBefore));
+    LOGFN("TrimRuntimeCaches - pipelines: {} -> 0", pipelinesBefore);
 }
 
 void Video::QueueTrimRuntimeCaches()
 {
+    if (!g_videoInitialized.load(std::memory_order_acquire))
+        return;
+
+    bool expected = false;
+    if (!g_runtimeCacheTrimQueued.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+        return;
+
     RenderCommand cmd;
     cmd.type = RenderCommandType::TrimRuntimeCaches;
     g_renderQueue.enqueue(cmd);
+}
+
+void Video::HandleAppBackgrounded()
+{
+    g_appActive.store(false, std::memory_order_release);
+    QueueTrimRuntimeCaches();
+    LOGN("iOS application entered the background.");
+}
+
+void Video::HandleAppForegrounded()
+{
+    g_appActive.store(true, std::memory_order_release);
+    LOGN("iOS application entered the foreground; swapchain acquisition will resume.");
+}
+
+void Video::HandleMemoryWarning()
+{
+    QueueTrimRuntimeCaches();
+    LOGN_WARNING("iOS reported memory pressure; queued runtime cache trimming.");
 }
 
 static GuestSurface* GetBackBuffer() 
@@ -3290,6 +3336,13 @@ void Video::ComputeViewportDimensions()
 {
     uint32_t width = g_swapChain->getWidth();
     uint32_t height = g_swapChain->getHeight();
+    if (width == 0 || height == 0)
+    {
+        s_viewportWidth = 1280;
+        s_viewportHeight = 720;
+        return;
+    }
+
     float aspectRatio = float(width) / float(height);
 
     switch (Config::AspectRatio)
@@ -5904,8 +5957,7 @@ static RenderFormat ConvertDXGIFormat(ddspp::DXGIFormat format)
     case ddspp::BC7_UNORM_SRGB:
         return RenderFormat::BC7_UNORM_SRGB;
     default:
-        os::logger::Log(fmt::format("Unsupported DDS DXGI format: {}", int(format)));
-        assert(false && "Unsupported format from DDS.");
+        LOGFN_WARNING("Unsupported DDS DXGI format: {}", int(format));
         return RenderFormat::UNKNOWN;
     }
 }
@@ -5971,41 +6023,197 @@ static bool IsBC7Format(RenderFormat format)
     return (format == RenderFormat::BC7_UNORM) || (format == RenderFormat::BC7_UNORM_SRGB) || (format == RenderFormat::BC7_TYPELESS);
 }
 
+static bool DecodeDDSHeader(const uint8_t* data, size_t dataSize, ddspp::Descriptor& descriptor)
+{
+    constexpr size_t minimumHeaderSize = sizeof(ddspp::DDS_MAGIC) + sizeof(ddspp::Header);
+    if (data == nullptr || dataSize < minimumHeaderSize)
+        return false;
+
+    alignas(std::max_align_t) std::array<unsigned char, ddspp::MAX_HEADER_SIZE> headerBytes{};
+    memcpy(headerBytes.data(), data, std::min(dataSize, headerBytes.size()));
+    return ddspp::decode_header(headerBytes.data(), descriptor) != ddspp::Error && descriptor.headerSize <= dataSize;
+}
+
+static bool ValidateDDSPayload(const ddspp::Descriptor& descriptor, uint32_t arraySize, size_t dataSize)
+{
+    if (descriptor.headerSize > dataSize || descriptor.width == 0 || descriptor.height == 0 ||
+        descriptor.depth == 0 || descriptor.numMips == 0 || arraySize == 0 ||
+        descriptor.numMips > 32 || arraySize > 2048 || descriptor.blockWidth == 0 ||
+        descriptor.blockHeight == 0 || descriptor.bitsPerPixelOrBlock == 0 ||
+        descriptor.width > 16384 || descriptor.height > 16384 || descriptor.depth > 2048)
+    {
+        return false;
+    }
+
+    uint32_t maximumMipLevels = 1;
+    for (uint32_t largestDimension = std::max({ descriptor.width, descriptor.height, descriptor.depth });
+        largestDimension > 1; largestDimension >>= 1)
+    {
+        ++maximumMipLevels;
+    }
+    if (descriptor.numMips > maximumMipLevels)
+        return false;
+
+    uint64_t sourceSize = 0;
+    uint64_t uploadSize = 0;
+    for (uint32_t arraySlice = 0; arraySlice < arraySize; ++arraySlice)
+    {
+        for (uint32_t mipSlice = 0; mipSlice < descriptor.numMips; ++mipSlice)
+        {
+            const uint64_t width = std::max(1u, descriptor.width >> mipSlice);
+            const uint64_t height = std::max(1u, descriptor.height >> mipSlice);
+            const uint64_t depth = std::max(1u, descriptor.depth >> mipSlice);
+            const uint64_t blockColumns = (width + descriptor.blockWidth - 1) / descriptor.blockWidth;
+            if (blockColumns > std::numeric_limits<uint64_t>::max() / descriptor.bitsPerPixelOrBlock)
+                return false;
+
+            const uint64_t rowBits = blockColumns * descriptor.bitsPerPixelOrBlock;
+            if (rowBits > std::numeric_limits<uint64_t>::max() - 7)
+                return false;
+
+            const uint64_t sourceRowPitch = (rowBits + 7) / 8;
+            if (sourceRowPitch > std::numeric_limits<uint64_t>::max() - (PITCH_ALIGNMENT - 1))
+                return false;
+
+            const uint64_t destinationRowPitch = (sourceRowPitch + PITCH_ALIGNMENT - 1) & ~(uint64_t(PITCH_ALIGNMENT) - 1);
+            const uint64_t rowCount = (height + descriptor.blockHeight - 1) / descriptor.blockHeight;
+            if (rowCount != 0 && (sourceRowPitch > std::numeric_limits<uint64_t>::max() / rowCount ||
+                destinationRowPitch > std::numeric_limits<uint64_t>::max() / rowCount))
+            {
+                return false;
+            }
+
+            const uint64_t sourceRowsSize = sourceRowPitch * rowCount;
+            const uint64_t destinationRowsSize = destinationRowPitch * rowCount;
+            if (depth != 0 && (sourceRowsSize > std::numeric_limits<uint64_t>::max() / depth ||
+                destinationRowsSize > std::numeric_limits<uint64_t>::max() / depth))
+            {
+                return false;
+            }
+
+            const uint64_t sourceSliceSize = sourceRowPitch * rowCount * depth;
+            const uint64_t destinationSliceSize = destinationRowPitch * rowCount * depth;
+
+            if (sourceSize > std::numeric_limits<uint64_t>::max() - sourceSliceSize ||
+                destinationSliceSize > std::numeric_limits<uint64_t>::max() - (PLACEMENT_ALIGNMENT - 1))
+            {
+                return false;
+            }
+
+            const uint64_t alignedDestinationSliceSize =
+                (destinationSliceSize + PLACEMENT_ALIGNMENT - 1) & ~(uint64_t(PLACEMENT_ALIGNMENT) - 1);
+            if (uploadSize > std::numeric_limits<uint64_t>::max() - alignedDestinationSliceSize)
+                return false;
+
+            sourceSize += sourceSliceSize;
+            uploadSize += alignedDestinationSliceSize;
+            if (sourceSize > dataSize - descriptor.headerSize ||
+                sourceSize > std::numeric_limits<uint32_t>::max() ||
+                uploadSize > std::numeric_limits<uint32_t>::max())
+                return false;
+        }
+    }
+
+    return sourceSize <= dataSize - descriptor.headerSize;
+}
+
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 static std::filesystem::path GetBC7OverrideDir()
 {
     return GetGamePath() / "bc7_override";
 }
 
+#if defined(UNLEASHED_RECOMP_IOS_DUMP_BC7)
 static std::filesystem::path GetBC7DumpDir()
 {
     return GetGamePath() / "bc7_dump";
 }
+#endif
 
 static std::filesystem::path BuildHashedBC7Path(const std::filesystem::path& directory, uint64_t hash)
 {
     return directory / fmt::format("{:016X}.dds", hash);
 }
 
-static bool TryLoadBC7OverrideBytes(uint64_t hash, std::vector<uint8_t>& outData, std::filesystem::path& outPath)
+static bool IsCompatibleBCOverride(const std::vector<uint8_t>& data, const ddspp::Descriptor& sourceDescriptor)
 {
+    ddspp::Descriptor overrideDescriptor;
+    if (!DecodeDDSHeader(data.data(), data.size(), overrideDescriptor))
+        return false;
+
+    const RenderFormat overrideFormat = ConvertDXGIFormat(overrideDescriptor.format);
+    return overrideFormat != RenderFormat::UNKNOWN && !IsBCFormat(overrideFormat) &&
+        overrideDescriptor.type == sourceDescriptor.type &&
+        overrideDescriptor.width == sourceDescriptor.width &&
+        overrideDescriptor.height == sourceDescriptor.height &&
+        overrideDescriptor.depth == sourceDescriptor.depth &&
+        overrideDescriptor.numMips == sourceDescriptor.numMips &&
+        overrideDescriptor.arraySize == sourceDescriptor.arraySize;
+}
+
+static bool TryLoadBC7OverrideBytes(uint64_t hash, const ddspp::Descriptor& sourceDescriptor,
+    std::vector<uint8_t>& outData, std::filesystem::path& outPath)
+{
+    constexpr size_t maxUnavailableOverrides = 4096;
+    static Mutex s_overrideCacheMutex;
+    static ankerl::unordered_dense::set<uint64_t> s_unavailableOverrides;
+
+    {
+        std::lock_guard<Mutex> lock(s_overrideCacheMutex);
+        if (s_unavailableOverrides.contains(hash))
+            return false;
+    }
+
+    auto markUnavailable = [&]
+    {
+        std::lock_guard<Mutex> lock(s_overrideCacheMutex);
+        if (s_unavailableOverrides.size() >= maxUnavailableOverrides)
+            s_unavailableOverrides.clear();
+        s_unavailableOverrides.emplace(hash);
+    };
+
     outPath = BuildHashedBC7Path(GetBC7OverrideDir(), hash);
 
     std::error_code ec;
     if (!std::filesystem::exists(outPath, ec) || ec)
+    {
+        markUnavailable();
         return false;
+    }
 
     const auto fileSize = std::filesystem::file_size(outPath, ec);
-    if (ec || fileSize == 0)
+    if (ec || fileSize == 0 || fileSize > std::numeric_limits<size_t>::max() ||
+        fileSize > static_cast<uintmax_t>(std::numeric_limits<std::streamsize>::max()))
+    {
+        markUnavailable();
         return false;
+    }
 
     outData.resize(size_t(fileSize));
     std::ifstream file(outPath, std::ios::binary);
     if (!file)
+    {
+        outData.clear();
+        markUnavailable();
         return false;
+    }
 
     file.read(reinterpret_cast<char*>(outData.data()), static_cast<std::streamsize>(outData.size()));
-    return file.good();
+    if (file.gcount() != static_cast<std::streamsize>(outData.size()))
+    {
+        outData.clear();
+        markUnavailable();
+        return false;
+    }
+
+    if (!IsCompatibleBCOverride(outData, sourceDescriptor))
+    {
+        outData.clear();
+        markUnavailable();
+        return false;
+    }
+
+    return true;
 }
 
 static uint64_t HashTextureData(const uint8_t* data, size_t size)
@@ -6020,12 +6228,16 @@ static uint64_t HashTextureData(const uint8_t* data, size_t size)
     return hash;
 }
 
+#if defined(UNLEASHED_RECOMP_IOS_DUMP_BC7)
 static void DumpBC7TextureForOfflineDecode(const uint8_t* data, size_t dataSize, const ddspp::Descriptor& ddsDesc)
 {
     static Mutex s_dumpMutex;
     static ankerl::unordered_dense::set<uint64_t> s_dumpedHashes;
 
     if (data == nullptr || dataSize <= ddsDesc.headerSize)
+        return;
+
+    if (dataSize > static_cast<size_t>(std::numeric_limits<std::streamsize>::max()))
         return;
 
     const uint64_t hash = HashTextureData(data, dataSize);
@@ -6053,8 +6265,9 @@ static void DumpBC7TextureForOfflineDecode(const uint8_t* data, size_t dataSize,
     if (!file)
         return;
 
-    os::logger::Log(fmt::format("Dumped BC7 DDS for offline decode: {}", filePath.string()));
+    LOGFN("Dumped BC7 DDS for offline decode: {}", filePath.string());
 }
+#endif
 #endif
 
 static inline uint8_t Expand5To8(uint32_t value)
@@ -6155,7 +6368,8 @@ static void DecodeBC4Block(const uint8_t* block, uint8_t outValues[16])
         outValues[p] = table[(indices >> (3 * p)) & 0x7];
 }
 
-static bool DecodeBCToRGBA8Mip0(const uint8_t* data, const ddspp::Descriptor& ddsDesc, RenderFormat format, std::vector<uint8_t>& outRGBA)
+static bool DecodeBCToRGBA8Mip0(const uint8_t* data, size_t dataSize, const ddspp::Descriptor& ddsDesc,
+    RenderFormat format, std::vector<uint8_t>& outRGBA)
 {
     if (ddsDesc.type != ddspp::Texture2D || ddsDesc.arraySize != 1 || ddsDesc.depth != 1)
         return false;
@@ -6169,12 +6383,19 @@ static bool DecodeBCToRGBA8Mip0(const uint8_t* data, const ddspp::Descriptor& dd
     if (width == 0 || height == 0)
         return false;
 
-    outRGBA.assign(size_t(width) * size_t(height) * 4, 0);
-
     const uint8_t* src = data + ddsDesc.headerSize;
     const uint32_t blocksX = (width + 3) / 4;
     const uint32_t blocksY = (height + 3) / 4;
     const uint32_t blockSize = IsBC1Format(format) || IsBC4Format(format) ? 8 : 16;
+    const uint64_t requiredSourceSize = uint64_t(blocksX) * blocksY * blockSize;
+    const uint64_t requiredDestinationSize = uint64_t(width) * height * 4;
+    if (requiredSourceSize > dataSize - ddsDesc.headerSize ||
+        requiredDestinationSize > std::numeric_limits<size_t>::max())
+    {
+        return false;
+    }
+
+    outRGBA.assign(static_cast<size_t>(requiredDestinationSize), 0);
 
     uint8_t rgbaBlock[16 * 4] = {};
     uint8_t alphaBlock[16] = {};
@@ -6292,10 +6513,19 @@ static bool DecodeBCToRGBA8Mip0(const uint8_t* data, const ddspp::Descriptor& dd
 static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataSize, RenderComponentMapping componentMapping, bool forceCubeMap = false, std::string_view sourceName = {})
 {
     ddspp::Descriptor ddsDesc;
-    if (ddspp::decode_header((unsigned char *)(data), ddsDesc) != ddspp::Error)
+    if (DecodeDDSHeader(data, dataSize, ddsDesc))
     {
         forceCubeMap &= (ddsDesc.type == ddspp::Texture2D) && (ddsDesc.arraySize == 1);
-        uint32_t arraySize = ddsDesc.type == ddspp::TextureType::Cubemap ? (ddsDesc.arraySize * 6) : ddsDesc.arraySize;
+        const uint64_t fileArraySize = ddsDesc.type == ddspp::TextureType::Cubemap ? uint64_t(ddsDesc.arraySize) * 6 : ddsDesc.arraySize;
+        if (fileArraySize > std::numeric_limits<uint32_t>::max())
+            return false;
+
+        const uint32_t arraySize = static_cast<uint32_t>(fileArraySize);
+        if (!ValidateDDSPayload(ddsDesc, arraySize, dataSize))
+        {
+            LOGFN_WARNING("Rejected truncated or invalid DDS texture payload ({} bytes).", dataSize);
+            return false;
+        }
             
         RenderTextureDesc desc;
         desc.dimension = ConvertTextureDimension(ddsDesc.type);
@@ -6306,6 +6536,8 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
         desc.arraySize = arraySize;
         desc.format = ConvertDXGIFormat(ddsDesc.format);
         desc.flags = ddsDesc.type == ddspp::TextureType::Cubemap ? RenderTextureFlag::CUBE : RenderTextureFlag::NONE;
+        if (desc.format == RenderFormat::UNKNOWN)
+            return false;
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
         if (IsBCFormat(desc.format))
@@ -6315,13 +6547,13 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
             {
                 std::vector<uint8_t> overrideData;
                 std::filesystem::path overridePath;
-                if (TryLoadBC7OverrideBytes(textureHash, overrideData, overridePath))
+                if (TryLoadBC7OverrideBytes(textureHash, ddsDesc, overrideData, overridePath))
                 {
-                    os::logger::Log(fmt::format("LoadTexture iOS BC override found ({:016X}): {}", textureHash, overridePath.string()));
+                    LOGFN("LoadTexture iOS BC override found ({:016X}): {}", textureHash, overridePath.string());
                     if (LoadTexture(texture, overrideData.data(), overrideData.size(), componentMapping, forceCubeMap, {}))
                         return true;
 
-                    os::logger::Log(fmt::format("LoadTexture iOS BC override failed to load ({:016X}), falling back to original: {}", textureHash, overridePath.string()));
+                    LOGFN("LoadTexture iOS BC override failed to load ({:016X}), falling back to original: {}", textureHash, overridePath.string());
                 }
             }
 
@@ -6329,7 +6561,7 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
             s_bcFallbackCount++;
 
             std::vector<uint8_t> decodedRGBA;
-            bool decoded = DecodeBCToRGBA8Mip0(data, ddsDesc, desc.format, decodedRGBA);
+            bool decoded = DecodeBCToRGBA8Mip0(data, dataSize, ddsDesc, desc.format, decodedRGBA);
 
             if (decoded)
             {
@@ -6367,25 +6599,25 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
 
                 if (s_bcFallbackCount <= 16 || (s_bcFallbackCount % 64) == 0)
                 {
-                    os::logger::Log(fmt::format(
+                    LOGFN(
                         "LoadTexture iOS BC decode - count: {}, format: {}, size: {}x{}, mips: {}, array: {}",
                         s_bcFallbackCount,
                         (int)desc.format,
                         desc.width,
                         desc.height,
                         desc.mipLevels,
-                        desc.arraySize));
+                        desc.arraySize);
                 }
 
                 return true;
             }
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if defined(UNLEASHED_RECOMP_IOS_DUMP_BC7)
             if (IsBC7Format(desc.format))
                 DumpBC7TextureForOfflineDecode(data, dataSize, ddsDesc);
 #endif
 
-            os::logger::Log(fmt::format(
+            LOGFN(
                 "LoadTexture iOS BC fallback (unsupported format) - count: {}, renderFormat: {}, dxgiFormat: {}, size: {}x{}, mips: {}, array: {}",
                 s_bcFallbackCount,
                 (int)desc.format,
@@ -6393,7 +6625,7 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
                 desc.width,
                 desc.height,
                 desc.mipLevels,
-                desc.arraySize));
+                desc.arraySize);
 
             texture.textureHolder = g_device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, RenderFormat::R8G8B8A8_UNORM));
             texture.texture = texture.textureHolder.get();

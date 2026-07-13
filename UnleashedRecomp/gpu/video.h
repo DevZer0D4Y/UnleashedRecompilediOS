@@ -25,6 +25,9 @@ struct Video
     static void WaitForGPU();
     static void ComputeViewportDimensions();
     static void QueueTrimRuntimeCaches();
+    static void HandleAppBackgrounded();
+    static void HandleAppForegrounded();
+    static void HandleMemoryWarning();
 };
 
 enum class Backend {

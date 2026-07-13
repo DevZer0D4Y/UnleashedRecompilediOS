@@ -55,6 +55,25 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
             break;
         }
 
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        case SDL_APP_WILLENTERBACKGROUND:
+        case SDL_APP_DIDENTERBACKGROUND:
+            Video::HandleAppBackgrounded();
+            break;
+
+        case SDL_APP_DIDENTERFOREGROUND:
+            Video::HandleAppForegrounded();
+            break;
+
+        case SDL_APP_LOWMEMORY:
+            Video::HandleMemoryWarning();
+            break;
+
+        case SDL_APP_TERMINATING:
+            os::logger::Shutdown();
+            break;
+#endif
+
         case SDL_KEYDOWN:
         {
             switch (event->key.keysym.sym)
@@ -339,10 +358,10 @@ void GameWindow::Init(const char* sdlVideoDriver)
         s_renderWindow.view = plume::ensureMetalLayerForIOSWindow(nullptr);
 
     if (s_renderWindow.view != nullptr)
-        os::logger::Log("GameWindow::Init - metal layer ready");
+        LOGN("GameWindow::Init - metal layer ready");
 
     if (s_renderWindow.view == nullptr)
-        os::logger::Log("GameWindow::Init - SDL_Metal_GetLayer returned null after retries");
+        LOGN_ERROR("GameWindow::Init - SDL_Metal_GetLayer returned null after retries");
 #else
     static_assert(false, "Unknown platform.");
 #endif
