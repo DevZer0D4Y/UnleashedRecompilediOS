@@ -3025,9 +3025,14 @@ static std::atomic<bool> g_executedCommandList;
 
 void Video::Present() 
 {
+#if !defined(UNLEASHED_RECOMP_MINIMAL_LOGGING)
     static std::atomic<uint32_t> s_presentLogCount = 0;
     const uint32_t presentLogIndex = s_presentLogCount.fetch_add(1);
     const bool logPresent = presentLogIndex < 4;
+#else
+    constexpr uint32_t presentLogIndex = 0;
+    constexpr bool logPresent = false;
+#endif
 
     if (logPresent)
         LOGFN("Video::Present begin - index: {}, frame: {}, swapChainValid: {}", presentLogIndex, g_frame, g_swapChainValid);
