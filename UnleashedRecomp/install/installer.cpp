@@ -318,7 +318,11 @@ static bool copyFile(const FilePair &pair, const uint64_t *fileHashes, VirtualFi
         }
     }
 
+#if !defined(UNLEASHED_RECOMP_IOS)
+    // std::filesystem::rename replaces an existing destination atomically on
+    // iOS. Windows requires the destination to be removed first.
     std::filesystem::remove(targetPath, fileError);
+#endif
     fileError.clear();
     std::filesystem::rename(temporaryPath, targetPath, fileError);
     if (fileError)

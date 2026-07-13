@@ -15,6 +15,7 @@
 
 #include <bit>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <set>
 #include <stack>
@@ -299,8 +300,8 @@ XContentFileSystem::XContentFileSystem(const std::filesystem::path &contentPath)
         return;
     }
 
-    XContentContainerHeader contentContainerHeader;
-    std::memcpy(&contentContainerHeader, rootMappedFileData, sizeof(contentContainerHeader));
+    const XContentContainerHeader& contentContainerHeader =
+        *reinterpret_cast<const XContentContainerHeader*>(rootMappedFileData);
     XContentPackageType packageType = XContentPackageType(contentContainerHeader.contentHeader.magic.get());
     if (packageType != XContentPackageType::CON && packageType != XContentPackageType::LIVE && packageType != XContentPackageType::PIRS)
     {

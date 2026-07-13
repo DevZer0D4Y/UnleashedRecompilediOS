@@ -1623,7 +1623,9 @@ static void CreateImGuiBackend()
 
 static void CheckSwapChain()
 {
+#if !defined(UNLEASHED_RECOMP_MINIMAL_LOGGING)
     static uint64_t s_installerInvalidCounter = 0;
+#endif
 
     if (!g_appActive.load(std::memory_order_acquire))
     {
@@ -1661,6 +1663,7 @@ static void CheckSwapChain()
 
     if (InstallerWizard::s_isVisible && !g_swapChainValid)
     {
+#if !defined(UNLEASHED_RECOMP_MINIMAL_LOGGING)
         s_installerInvalidCounter++;
         if ((s_installerInvalidCounter % 120) == 0)
         {
@@ -1668,6 +1671,7 @@ static void CheckSwapChain()
                 "CheckSwapChain - still invalid during installer (count: {}, needsResize: {}, swapChainSize: {}x{}, isEmpty: {})",
                 s_installerInvalidCounter, needsResize, g_swapChain->getWidth(), g_swapChain->getHeight(), g_swapChain->isEmpty());
         }
+#endif
     }
 
     if (g_needsResize)
