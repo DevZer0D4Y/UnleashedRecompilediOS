@@ -360,7 +360,8 @@ static std::unique_ptr<RenderSwapChain> g_swapChain;
 static bool g_swapChainValid;
 static std::atomic<bool> g_videoInitialized = false;
 static std::atomic<bool> g_appActive = true;
-static std::atomic<bool> g_runtimeCacheTrimQueued = false;
+static std::atomic<bool> g_runtimeCacheTrimRequested = false;
+static std::atomic<bool> g_runtimeCacheTrimInProgress = false;
 
 static constexpr RenderFormat BACKBUFFER_FORMAT = RenderFormat::B8G8R8A8_UNORM;
 
@@ -3055,6 +3056,14 @@ void Video::Present()
     cmd.type = RenderCommandType::ExecuteCommandList;
     g_renderQueue.enqueue(cmd);
 
+    const bool trimRuntimeCaches = g_runtimeCacheTrimRequested.exchange(false, std::memory_order_acq_rel);
+    if (trimRuntimeCaches)
+    {
+        g_runtimeCacheTrimInProgress.store(true, std::memory_order_release);
+        cmd.type = RenderCommandType::TrimRuntimeCaches;
+        g_renderQueue.enqueue(cmd);
+    }
+
     // All the shaders are available at this point. We can precompile embedded PSOs then.
     if (g_shouldPrecompilePipelines)
     {
@@ -3067,6 +3076,9 @@ void Video::Present()
 
     g_executedCommandList.wait(false);
     g_executedCommandList = false;
+
+    if (trimRuntimeCaches)
+        g_runtimeCacheTrimInProgress.wait(true, std::memory_order_acquire);
 
     if (logPresent)
         LOGFN("Video::Present command list completed - index: {}", presentLogIndex);
@@ -3279,7 +3291,11 @@ static void ProcTrimRuntimeCaches(const RenderCommand&)
 {
     ios_signposts::Interval trimSignpost(ios_signposts::IntervalKind::CacheTrim);
 
-    g_runtimeCacheTrimQueued.store(false, std::memory_order_release);
+    // Metal command buffers use unretained references. This command is placed
+    // immediately after the current frame submission, so draining the queue
+    // here makes every cached pipeline safe to release.
+    Video::WaitForGPU();
+
     const size_t pipelinesBefore = g_pipelines.size();
 
     g_pipelines = {};
@@ -3305,6 +3321,8 @@ static void ProcTrimRuntimeCaches(const RenderCommand&)
     }
 
     LOGFN("TrimRuntimeCaches - pipelines: {} -> 0", pipelinesBefore);
+    g_runtimeCacheTrimInProgress.store(false, std::memory_order_release);
+    g_runtimeCacheTrimInProgress.notify_all();
 }
 
 void Video::QueueTrimRuntimeCaches()
@@ -3312,13 +3330,7 @@ void Video::QueueTrimRuntimeCaches()
     if (!g_videoInitialized.load(std::memory_order_acquire))
         return;
 
-    bool expected = false;
-    if (!g_runtimeCacheTrimQueued.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-        return;
-
-    RenderCommand cmd;
-    cmd.type = RenderCommandType::TrimRuntimeCaches;
-    g_renderQueue.enqueue(cmd);
+    g_runtimeCacheTrimRequested.store(true, std::memory_order_release);
 }
 
 void Video::HandleAppBackgrounded()
