@@ -1,6 +1,7 @@
 #include <os/process.h>
 
 #include <CoreFoundation/CFBundle.h>
+#include <TargetConditionals.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <signal.h>
@@ -60,6 +61,13 @@ bool os::process::SetWorkingDirectory(const std::filesystem::path& path)
 
 bool os::process::StartProcess(const std::filesystem::path& path, const std::vector<std::string>& args, std::filesystem::path work)
 {
+#if TARGET_OS_IPHONE
+    // iOS does not permit an app to fork/exec a replacement process.
+    (void)path;
+    (void)args;
+    (void)work;
+    return false;
+#else
     pid_t pid = fork();
     if (pid < 0)
         return false;
@@ -83,6 +91,7 @@ bool os::process::StartProcess(const std::filesystem::path& path, const std::vec
     }
 
     return true;
+#endif
 }
 
 void os::process::CheckConsole()

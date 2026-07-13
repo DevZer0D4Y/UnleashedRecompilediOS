@@ -14,7 +14,9 @@
 
 void App::Restart(std::vector<std::string> restartArgs)
 {
-    os::process::StartProcess(os::process::GetExecutablePath(), restartArgs, os::process::GetWorkingDirectory());
+    if (!os::process::StartProcess(os::process::GetExecutablePath(), restartArgs, os::process::GetWorkingDirectory()))
+        LOG_WARNING("The platform cannot relaunch the application; exiting so it can be opened again normally.");
+
     Exit();
 }
 

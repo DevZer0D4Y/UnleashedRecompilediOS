@@ -50,6 +50,12 @@ Heap g_userHeap;
 XDBFWrapper g_xdbfWrapper;
 std::unordered_map<uint16_t, GuestTexture*> g_xdbfTextureCache;
 
+[[noreturn]] static void ExitImmediately(int code)
+{
+    os::logger::Shutdown();
+    std::_Exit(code);
+}
+
 void HostStartup()
 {
 #ifdef _WIN32
@@ -66,7 +72,7 @@ void KiSystemStartup()
     {
         LOGN_ERROR("Failed to reserve the 4 GiB guest memory space.");
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("System_MemoryAllocationFailed").c_str(), GameWindow::s_pWindow);
-        std::_Exit(1);
+        ExitImmediately(1);
     }
 
     LOGFN("Guest memory base: {}", static_cast<void*>(g_memory.base));
@@ -190,7 +196,7 @@ void init()
         MessageBoxA(nullptr, "Your CPU does not meet the minimum system requirements.", "Unleashed Recompiled", MB_ICONERROR);
 #endif
 
-        std::_Exit(1);
+        ExitImmediately(1);
     }
 }
 #endif
@@ -297,7 +303,7 @@ int main(int argc, char *argv[])
         }
 
         SDL_ShowSimpleMessageBox(messageBoxStyle, GameWindow::GetTitle(), resultText, GameWindow::s_pWindow);
-        std::_Exit(int(journal.lastResult));
+        ExitImmediately(int(journal.lastResult));
     }
 
 #if defined(_WIN32) && defined(UNLEASHED_RECOMP_D3D12)
@@ -308,7 +314,7 @@ int main(int argc, char *argv[])
             char text[512];
             snprintf(text, sizeof(text), Localise("System_Win32_MissingDLLs").c_str(), dll.data());
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), text, GameWindow::s_pWindow);
-            std::_Exit(1);
+            ExitImmediately(1);
         }
     }
 #endif
@@ -348,12 +354,12 @@ int main(int argc, char *argv[])
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
         {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
-            std::_Exit(1);
+            ExitImmediately(1);
         }
 
         if (!InstallerWizard::Run(GetGamePath(), isGameInstalled && forceDLCInstaller))
         {
-            std::_Exit(0);
+            ExitImmediately(0);
         }
 
         isGameInstalled = Installer::checkGameInstall(gameRoot, modulePath);
@@ -361,7 +367,7 @@ int main(int argc, char *argv[])
         if (!isGameInstalled)
         {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), "Install data is still incomplete after installer. Ensure game/update sources are selected and installation finishes.", GameWindow::s_pWindow);
-            std::_Exit(1);
+            ExitImmediately(1);
         }
     }
 
@@ -378,7 +384,7 @@ int main(int argc, char *argv[])
     if (entry == 0)
     {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), "Failed to load game executable (patched/default.xex). Re-run installer and verify game/update files.", GameWindow::s_pWindow);
-        std::_Exit(1);
+        ExitImmediately(1);
     }
 
     if (!runInstallerWizard)
@@ -386,7 +392,7 @@ int main(int argc, char *argv[])
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
         {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
-            std::_Exit(1);
+            ExitImmediately(1);
         }
     }
 
