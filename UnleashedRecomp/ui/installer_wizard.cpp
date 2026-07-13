@@ -1467,8 +1467,11 @@ static void DrawInstallingProgress()
 
         if (g_installerFinished)
         {
-            g_installerThread->join();
-            g_installerThread.reset();
+            if (g_installerThread != nullptr)
+            {
+                g_installerThread->join();
+                g_installerThread.reset();
+            }
             g_installerEndTime = ImGui::GetTime();
             g_currentPage = g_installerFailed ? WizardPage::InstallFailed : WizardPage::InstallSucceeded;
         }
@@ -1524,7 +1527,16 @@ static void InstallerStart()
     g_installerProgressRatioTarget = 0.0f;
     g_installerFailed = false;
     g_installerFinished = false;
-    g_installerThread = std::make_unique<std::thread>(InstallerThread);
+    try
+    {
+        g_installerThread = std::make_unique<std::thread>(InstallerThread);
+    }
+    catch (const std::exception& exception)
+    {
+        g_installerFailed = true;
+        g_installerErrorMessage = fmt::format("Unable to start installation: {}", exception.what());
+        g_installerFinished.store(true, std::memory_order_release);
+    }
 }
 
 static bool InstallerParseSources(std::string &errorMessage)
