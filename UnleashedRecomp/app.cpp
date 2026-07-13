@@ -4,6 +4,7 @@
 #include <install/installer.h>
 #include <kernel/function.h>
 #include <os/logger.h>
+#include <os/ios/signposts.h>
 #include <os/process.h>
 #include <patches/audio_patches.h>
 #include <patches/inspire_patches.h>
@@ -14,6 +15,8 @@
 
 void App::Restart(std::vector<std::string> restartArgs)
 {
+    ios_signposts::Emit(ios_signposts::EventKind::Restart);
+
     if (!os::process::StartProcess(os::process::GetExecutablePath(), restartArgs, os::process::GetWorkingDirectory()))
         LOG_WARNING("The platform cannot relaunch the application; exiting so it can be opened again normally.");
 

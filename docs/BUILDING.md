@@ -119,15 +119,15 @@ open -a UnleashedRecomp.app
 ### iOS (experimental)
 1. Configure the project with the iOS preset.
 ```bash
-cmake . --preset ios-xcode-debug
+cmake --preset ios-xcode-debug
 ```
 
 > [!NOTE]
-> The available presets are `ios-xcode-debug` and `ios-xcode-release`.
+> The available Xcode presets are `ios-xcode-debug`, `ios-xcode-relwithdebinfo` and `ios-xcode-release`.
 
 2. Build the target.
 ```bash
-cmake --build ./out/build/ios-debug --target UnleashedRecomp
+cmake --build ./out/build/ios-xcode-debug --config Debug --target UnleashedRecomp
 ```
 
 3. Open the generated Xcode project/build output for signing and deployment to a device.
@@ -135,7 +135,7 @@ cmake --build ./out/build/ios-debug --target UnleashedRecomp
 ### iOS with Xcode (device install) (recommended)
 1. Configure with the Xcode generator preset.
 ```bash
-cmake . --preset ios-xcode-debug \
+cmake --preset ios-xcode-debug \
 	-DUNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM=YOURTEAMID \
 	-DUNLEASHED_RECOMP_IOS_BUNDLE_ID=com.yourname.unleashedrecomp
 ```
@@ -153,3 +153,5 @@ open ./out/build/ios-xcode-debug/UnleashedRecomp.xcodeproj
 
 > [!IMPORTANT]
 > Current iOS support is experimental and uses pre-generated recompilation/resource artifacts during cross-builds (host-side recompilers and desktop-native file pickers are skipped).
+
+See [iOS validation and profiling](IOS_VALIDATION.md) for diagnostic build options, the device test matrix, and the required Instruments passes.

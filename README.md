@@ -288,19 +288,15 @@ Simply booting at least once in Desktop Mode will enable the Deck to use the fil
 
 ### Broken Textures on iOS
 
-This is a hardware issue with iOS not supporting BC7 textures. Every time you encounter a texture that the game can't decode, it will dump it to UnleashedRecomp/bc7_dump, named after the hash of the texture. If you go to a tool like NVIDIA Texture Tools Exporter and convert it to a format such as BC3, you can put it in UnleashedRecomp/bc7_override and it will then load the texture from there.
+Some iOS Metal devices or paths cannot use the game's BC7 textures. A converted texture can be placed in `UnleashedRecomp/bc7_override`; the loader validates its dimensions, mip count, array/depth layout, and format before using it. Automatic BC7 dumping is disabled in normal builds because it performs synchronous file I/O. Diagnostic builds can enable `UNLEASHED_RECOMP_IOS_DUMP_BC7` to write payloads to `UnleashedRecomp/bc7_dump` for offline conversion.
 
 ### iOS Build Crashing after long playtime/exiting to menu and returning to gameplay a few times
 
-This is an issue with how memory management is handled on iOS, basically the game can't free memory properly and memory usage grows over time, with the problem being made FAR worse while running with a debugger. For most gameplay, this shouldn't be an issue as it doesn't grow very fast unless the gameplay state is loaded multiple times.
-
-Why it grows even faster on a debugger, I have no clue. If you can figure it out, please submit a PR.
->Update:
->This may be fixed??? I didn't change anything other than compiling with -O2 but the memory usage without a debugger may have gone away.
+Renderer caches now have explicit trim points for backgrounding and memory warnings, and iOS restart requests use a clean process exit instead of attempting to rebuild the complete SDL/Metal object graph in process. This work still requires repeated-cycle validation on physical devices; debugger-attached memory numbers are not representative of a production Release build. See [the iOS validation plan](docs/IOS_VALIDATION.md).
 
 ### iOS IPA does not work past installer
 
-I genuninely have no clue what's causing this, as the logging just entirely dies but the app doesn't somehow. If you have some clue what the heck is happening with this (I suspect it's something to do with the Metal handoff when the program soft restarts) PLEASE open an issue or a PR.
+The installer-to-game path now keeps and validates the existing renderer/swapchain rather than attempting a second native object graph. This path has not yet been verified by this audit on a signed IPA or physical device; follow the installer and lifecycle matrix in [the iOS validation plan](docs/IOS_VALIDATION.md) before treating the issue as resolved.
 
 ## FAQ
 

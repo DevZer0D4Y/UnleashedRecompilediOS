@@ -12,6 +12,7 @@
 #include <locale/locale.h>
 #include <patches/aspect_ratio_patches.h>
 #include <os/logger.h>
+#include <os/ios/signposts.h>
 #include <ui/imgui_utils.h>
 #include <ui/button_guide.h>
 #include <ui/message_window.h>
@@ -1476,6 +1477,8 @@ static void DrawInstallingProgress()
 
 static void InstallerThread()
 {
+    ios_signposts::Interval installerSignpost(ios_signposts::IntervalKind::Installer);
+
     bool installSucceeded = false;
     try
     {

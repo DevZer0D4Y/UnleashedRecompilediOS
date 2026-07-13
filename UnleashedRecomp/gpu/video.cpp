@@ -33,6 +33,7 @@
 #include <sdl_listener.h>
 #include <xxHashMap.h>
 #include <os/logger.h>
+#include <os/ios/signposts.h>
 #include <os/process.h>
 
 #include <cstdlib>
@@ -1791,6 +1792,8 @@ static void ApplyIOSMetalHUDConfig()
 
 bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
 {
+    ios_signposts::Interval startupSignpost(ios_signposts::IntervalKind::RendererStartup);
+
     for (uint32_t i = 0; i < 16; i++)
         g_inputSlots[i].index = i;
 
@@ -3270,6 +3273,8 @@ static void ProcBeginCommandList(const RenderCommand& cmd)
 
 static void ProcTrimRuntimeCaches(const RenderCommand&)
 {
+    ios_signposts::Interval trimSignpost(ios_signposts::IntervalKind::CacheTrim);
+
     g_runtimeCacheTrimQueued.store(false, std::memory_order_release);
     const size_t pipelinesBefore = g_pipelines.size();
 
@@ -3314,6 +3319,7 @@ void Video::QueueTrimRuntimeCaches()
 
 void Video::HandleAppBackgrounded()
 {
+    ios_signposts::Emit(ios_signposts::EventKind::Background);
     g_appActive.store(false, std::memory_order_release);
     QueueTrimRuntimeCaches();
     LOGN("iOS application entered the background.");
@@ -3321,12 +3327,14 @@ void Video::HandleAppBackgrounded()
 
 void Video::HandleAppForegrounded()
 {
+    ios_signposts::Emit(ios_signposts::EventKind::Foreground);
     g_appActive.store(true, std::memory_order_release);
     LOGN("iOS application entered the foreground; swapchain acquisition will resume.");
 }
 
 void Video::HandleMemoryWarning()
 {
+    ios_signposts::Emit(ios_signposts::EventKind::MemoryWarning);
     QueueTrimRuntimeCaches();
     LOGN_WARNING("iOS reported memory pressure; queued runtime cache trimming.");
 }
