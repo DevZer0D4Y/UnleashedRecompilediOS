@@ -14,6 +14,19 @@ option(UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING "Enable code signing for iOS bui
 option(UNLEASHED_RECOMP_IOS_LOW_MEM_INSTALLER "Load fewer installer textures on iOS to reduce memory usage" ON)
 option(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING "Enable verbose console and buffered file logging on iOS" OFF)
 option(UNLEASHED_RECOMP_METAL_SHADER_DEBUG_INFO "Embed Metal shader source and line tables for GPU debugging" OFF)
+set(UNLEASHED_RECOMP_IOS_GUEST_STACK_MIN_KIB "8192" CACHE STRING "Minimum native stack size for an iOS guest thread, in KiB")
+set(UNLEASHED_RECOMP_IOS_GUEST_STACK_MAX_KIB "65536" CACHE STRING "Maximum native stack size for an iOS guest thread, in KiB")
+
+if (UNLEASHED_RECOMP_IOS)
+    foreach(STACK_LIMIT IN ITEMS MIN MAX)
+        if (NOT UNLEASHED_RECOMP_IOS_GUEST_STACK_${STACK_LIMIT}_KIB MATCHES "^[0-9]+$")
+            message(FATAL_ERROR "UNLEASHED_RECOMP_IOS_GUEST_STACK_${STACK_LIMIT}_KIB must be a non-negative integer")
+        endif()
+    endforeach()
+    if (UNLEASHED_RECOMP_IOS_GUEST_STACK_MIN_KIB GREATER UNLEASHED_RECOMP_IOS_GUEST_STACK_MAX_KIB)
+        message(FATAL_ERROR "The iOS guest-thread minimum stack size cannot exceed the maximum")
+    endif()
+endif()
 
 if (UNLEASHED_RECOMP_IOS AND NOT UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM)
     if (DEFINED ENV{DEVELOPMENT_TEAM} AND NOT "$ENV{DEVELOPMENT_TEAM}" STREQUAL "")
@@ -452,6 +465,9 @@ elseif (UNLEASHED_RECOMP_IOS)
     )
 
     target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS UNLEASHED_RECOMP_IOS_INSTALLER_PNGS)
+    target_compile_definitions(UnleashedRecomp PRIVATE
+        UNLEASHED_RECOMP_IOS_GUEST_STACK_MIN_KIB=${UNLEASHED_RECOMP_IOS_GUEST_STACK_MIN_KIB}
+        UNLEASHED_RECOMP_IOS_GUEST_STACK_MAX_KIB=${UNLEASHED_RECOMP_IOS_GUEST_STACK_MAX_KIB})
     if (UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
         target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
     else()

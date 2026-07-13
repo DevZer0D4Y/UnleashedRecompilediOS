@@ -6,6 +6,11 @@
 #include <os/logger.h>
 #include "ppc_context.h"
 
+#ifdef USE_PTHREAD
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
+
 constexpr size_t PCR_SIZE = 0xAB0;
 constexpr size_t TLS_SIZE = 0x100;
 constexpr size_t TEB_SIZE = 0x2E0;
@@ -44,6 +49,16 @@ GuestThreadContext::~GuestThreadContext()
 #ifdef USE_PTHREAD
 static size_t GetStackSize(uint32_t requestedSize)
 {
+#if defined(UNLEASHED_RECOMP_IOS)
+    constexpr size_t iosMinStack = size_t(UNLEASHED_RECOMP_IOS_GUEST_STACK_MIN_KIB) * 1024;
+    constexpr size_t iosMaxStack = size_t(UNLEASHED_RECOMP_IOS_GUEST_STACK_MAX_KIB) * 1024;
+    size_t targetSize = std::clamp<size_t>(requestedSize, iosMinStack, iosMaxStack);
+
+    if (requestedSize != 0 && targetSize != requestedSize)
+    {
+        LOGFN("Adjusted unusual iOS guest stack request from {} to {} bytes.", requestedSize, targetSize);
+    }
+#else
     // Cache as this should not change.
     static size_t stackSize = 0;
     if (stackSize == 0)
@@ -68,14 +83,12 @@ static size_t GetStackSize(uint32_t requestedSize)
     {
         targetSize = std::max(targetSize, static_cast<size_t>(requestedSize));
     }
-
-#if defined(UNLEASHED_RECOMP_IOS)
-    constexpr size_t IOS_MIN_GUEST_STACK = 16 * 1024 * 1024;
-    targetSize = std::max(targetSize, IOS_MIN_GUEST_STACK);
 #endif
 
     targetSize = std::max(targetSize, static_cast<size_t>(PTHREAD_STACK_MIN));
-    return targetSize;
+    const long pageSizeResult = sysconf(_SC_PAGESIZE);
+    const size_t pageSize = pageSizeResult > 0 ? static_cast<size_t>(pageSizeResult) : 4096;
+    return ((targetSize + pageSize - 1) / pageSize) * pageSize;
 }
 
 static void* GuestThreadFunc(void* arg)
@@ -99,15 +112,36 @@ GuestThreadHandle::GuestThreadHandle(const GuestThreadParams& params)
 #ifdef USE_PTHREAD
 {
     pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, GetStackSize(params.stackSize));
-    const auto ret = pthread_create(&thread, &attr, GuestThreadFunc, this);
-    pthread_attr_destroy(&attr);
-    if (ret != 0) {
-        LOGFN_ERROR("pthread_create failed with error code 0x{:X}.", ret);
+    int result = pthread_attr_init(&attr);
+    if (result != 0)
+    {
+        LOGFN_ERROR("pthread_attr_init failed with error code 0x{:X}.", result);
         return;
     }
 
+    const size_t stackSize = GetStackSize(params.stackSize);
+    result = pthread_attr_setstacksize(&attr, stackSize);
+    if (result != 0)
+    {
+        LOGFN_ERROR("pthread_attr_setstacksize failed for {} bytes with error code 0x{:X}.", stackSize, result);
+        const int destroyResult = pthread_attr_destroy(&attr);
+        if (destroyResult != 0)
+            LOGFN_WARNING("pthread_attr_destroy failed with error code 0x{:X}.", destroyResult);
+        return;
+    }
+
+    result = pthread_create(&thread, &attr, GuestThreadFunc, this);
+    const int destroyResult = pthread_attr_destroy(&attr);
+    if (destroyResult != 0)
+        LOGFN_WARNING("pthread_attr_destroy failed with error code 0x{:X}.", destroyResult);
+
+    if (result != 0)
+    {
+        LOGFN_ERROR("pthread_create failed with error code 0x{:X}.", result);
+        return;
+    }
+
+    joinable.store(true, std::memory_order_release);
     LOGFN("GuestThreadHandle created - function: 0x{:08X}, value: 0x{:08X}, flags: 0x{:08X}, threadId: 0x{:08X}", params.function, params.value, params.flags, GetThreadId());
 }
 #else
@@ -118,8 +152,27 @@ GuestThreadHandle::GuestThreadHandle(const GuestThreadParams& params)
 
 GuestThreadHandle::~GuestThreadHandle()
 {
+    Join();
+}
+
+bool GuestThreadHandle::IsValid() const
+{
 #ifdef USE_PTHREAD
-    pthread_join(thread, nullptr);
+    return joinable.load(std::memory_order_acquire);
+#else
+    return thread.joinable();
+#endif
+}
+
+void GuestThreadHandle::Join()
+{
+#ifdef USE_PTHREAD
+    if (joinable.exchange(false, std::memory_order_acq_rel))
+    {
+        const int result = pthread_join(thread, nullptr);
+        if (result != 0)
+            LOGFN_ERROR("pthread_join failed with error code 0x{:X}.", result);
+    }
 #else
     if (thread.joinable())
         thread.join();
@@ -137,6 +190,9 @@ static uint32_t CalcThreadId(const ThreadType& id)
 
 uint32_t GuestThreadHandle::GetThreadId() const
 {
+    if (!IsValid())
+        return 0;
+
 #ifdef USE_PTHREAD
     return CalcThreadId(thread);
 #else
@@ -148,12 +204,7 @@ uint32_t GuestThreadHandle::Wait(uint32_t timeout)
 {
     assert(timeout == INFINITE);
 
-#ifdef USE_PTHREAD
-    pthread_join(thread, nullptr);
-#else
-    if (thread.joinable())
-        thread.join();
-#endif
+    Join();
 
     return STATUS_WAIT_0;
 }
@@ -169,6 +220,12 @@ uint32_t GuestThread::Start(const GuestThreadParams& params)
 
     auto* function = g_memory.FindFunction(params.function);
     LOGFN("GuestThread::Start resolved host function - guest: 0x{:08X}, host: {}", params.function, reinterpret_cast<void*>(function));
+    if (function == nullptr)
+    {
+        LOGFN_ERROR("No host function is mapped for guest address 0x{:08X}.", params.function);
+        return 0;
+    }
+
     function(ctx.ppcContext, g_memory.base);
 
     LOGFN("GuestThread::Start end - function: 0x{:08X}, r3: 0x{:08X}", params.function, ctx.ppcContext.r3.u32);
@@ -178,6 +235,13 @@ uint32_t GuestThread::Start(const GuestThreadParams& params)
 GuestThreadHandle* GuestThread::Start(const GuestThreadParams& params, uint32_t* threadId)
 {
     auto hThread = CreateKernelObject<GuestThreadHandle>(params);
+    if (!hThread->IsValid())
+    {
+        DestroyKernelObject(hThread);
+        if (threadId != nullptr)
+            *threadId = 0;
+        return nullptr;
+    }
 
     if (threadId != nullptr)
     {

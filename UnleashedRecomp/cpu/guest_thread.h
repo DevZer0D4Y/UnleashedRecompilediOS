@@ -35,7 +35,8 @@ struct GuestThreadHandle : KernelObject
     GuestThreadParams params;
     std::atomic<bool> suspended;
 #ifdef USE_PTHREAD
-    pthread_t thread;
+    pthread_t thread{};
+    std::atomic<bool> joinable{ false };
 #else
     std::thread thread;
 #endif
@@ -43,9 +44,13 @@ struct GuestThreadHandle : KernelObject
     GuestThreadHandle(const GuestThreadParams& params);
     ~GuestThreadHandle() override;
 
+    bool IsValid() const;
     uint32_t GetThreadId() const;
 
     uint32_t Wait(uint32_t timeout) override;
+
+private:
+    void Join();
 };
 
 struct GuestThread
