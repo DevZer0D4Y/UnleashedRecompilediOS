@@ -186,7 +186,8 @@
             "displayName": "iOS-Xcode-Debug",
             "inherits": "ios-xcode-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "UNLEASHED_RECOMP_METAL_SHADER_DEBUG_INFO": true
             }
         },
         {
@@ -237,10 +238,8 @@
             "inherits": "ios-xcode-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_INTERPROCEDURAL_OPTIMIZATION": false,
-                "CMAKE_C_FLAGS_RELEASE": "-O2 -g",
-                "CMAKE_CXX_FLAGS_RELEASE": "-O2 -g",
-                "CMAKE_XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL": "2"
+                "CMAKE_INTERPROCEDURAL_OPTIMIZATION": true,
+                "CMAKE_XCODE_ATTRIBUTE_GCC_OPTIMIZATION_LEVEL": "3"
             }
         }
     ]

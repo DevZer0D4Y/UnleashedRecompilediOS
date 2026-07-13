@@ -10,6 +10,14 @@ if (UNLEASHED_RECOMP_IOS)
     set(UNLEASHED_RECOMP_USE_PREGENERATED_RECOMP ON)
 endif()
 
+set(UNLEASHED_RECOMP_PPC_BOUNDS_CHECK "AUTO" CACHE STRING
+    "Guest-memory bounds checking: AUTO enables it in Debug, ON enables it in every configuration, and OFF disables it")
+set_property(CACHE UNLEASHED_RECOMP_PPC_BOUNDS_CHECK PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${UNLEASHED_RECOMP_PPC_BOUNDS_CHECK}" UNLEASHED_RECOMP_PPC_BOUNDS_CHECK_MODE)
+if (NOT UNLEASHED_RECOMP_PPC_BOUNDS_CHECK_MODE MATCHES "^(AUTO|ON|OFF)$")
+    message(FATAL_ERROR "UNLEASHED_RECOMP_PPC_BOUNDS_CHECK must be AUTO, ON, or OFF")
+endif()
+
 add_compile_options(
     -fno-strict-aliasing
 )
@@ -100,13 +108,12 @@ add_library(UnleashedRecompLib
 )
 
 if (UNLEASHED_RECOMP_IOS)
-    target_compile_definitions(UnleashedRecompLib PUBLIC
-        UNLEASHED_RECOMP_PPC_BOUNDS_CHECK
-    )
-
-    target_compile_options(UnleashedRecompLib PRIVATE
-        "$<$<CONFIG:Debug>:-O2>"
-    )
+    if (UNLEASHED_RECOMP_PPC_BOUNDS_CHECK_MODE STREQUAL "ON")
+        target_compile_definitions(UnleashedRecompLib PUBLIC UNLEASHED_RECOMP_PPC_BOUNDS_CHECK)
+    elseif (UNLEASHED_RECOMP_PPC_BOUNDS_CHECK_MODE STREQUAL "AUTO")
+        target_compile_definitions(UnleashedRecompLib PUBLIC
+            "$<$<CONFIG:Debug>:UNLEASHED_RECOMP_PPC_BOUNDS_CHECK>")
+    endif()
 endif()
 
 target_include_directories(UnleashedRecompLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

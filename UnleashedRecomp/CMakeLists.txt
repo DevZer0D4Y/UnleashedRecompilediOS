@@ -12,6 +12,8 @@ set(UNLEASHED_RECOMP_IOS_CODE_SIGN_STYLE "Automatic" CACHE STRING "iOS code sign
 set(UNLEASHED_RECOMP_IOS_PROVISIONING_PROFILE_SPECIFIER "" CACHE STRING "Provisioning profile specifier for iOS signing")
 option(UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING "Enable code signing for iOS builds" ON)
 option(UNLEASHED_RECOMP_IOS_LOW_MEM_INSTALLER "Load fewer installer textures on iOS to reduce memory usage" ON)
+option(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING "Enable verbose console and buffered file logging on iOS" OFF)
+option(UNLEASHED_RECOMP_METAL_SHADER_DEBUG_INFO "Embed Metal shader source and line tables for GPU debugging" OFF)
 
 if (UNLEASHED_RECOMP_IOS AND NOT UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM)
     if (DEFINED ENV{DEVELOPMENT_TEAM} AND NOT "$ENV{DEVELOPMENT_TEAM}" STREQUAL "")
@@ -414,6 +416,8 @@ elseif (UNLEASHED_RECOMP_IOS)
         XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
         XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
         XCODE_ATTRIBUTE_ENABLE_BITCODE "NO"
+        XCODE_ATTRIBUTE_DEAD_CODE_STRIPPING "$<IF:$<CONFIG:Release>,YES,NO>"
+        XCODE_ATTRIBUTE_STRIP_INSTALLED_PRODUCT "$<IF:$<CONFIG:Release>,YES,NO>"
     )
 
     if (NOT UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING)
@@ -448,6 +452,12 @@ elseif (UNLEASHED_RECOMP_IOS)
     )
 
     target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS UNLEASHED_RECOMP_IOS_INSTALLER_PNGS)
+    if (UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
+        target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS_DETAILED_LOGGING)
+    else()
+        target_compile_definitions(UnleashedRecomp PRIVATE
+            "$<$<CONFIG:Release>:UNLEASHED_RECOMP_MINIMAL_LOGGING>")
+    endif()
     if (UNLEASHED_RECOMP_IOS_LOW_MEM_INSTALLER)
         target_compile_definitions(UnleashedRecomp PRIVATE UNLEASHED_RECOMP_IOS_LOW_MEM_INSTALLER)
     endif()
@@ -547,10 +557,16 @@ function(compile_shader FILE_PATH TARGET_NAME)
     cmake_path(GET MSL_FILE_PATH STEM MSL_NAME)
 
     if (UNLEASHED_RECOMP_METAL)
+        set(METAL_DEBUG_FLAGS)
+        if (UNLEASHED_RECOMP_METAL_SHADER_DEBUG_INFO)
+            list(APPEND METAL_DEBUG_FLAGS -frecord-sources -gline-tables-only)
+        endif()
         add_custom_command(
-                OUTPUT ${MSL_FILE_PATH}.ir
-            COMMAND ${XCRUN_TOOL} -sdk ${UNLEASHED_RECOMP_APPLE_SDK} metal -o ${MSL_FILE_PATH}.ir -c ${MSL_FILE_PATH} -D__air__ -frecord-sources -gline-tables-only
-                DEPENDS ${MSL_FILE_PATH}
+            OUTPUT ${MSL_FILE_PATH}.ir
+            COMMAND ${XCRUN_TOOL} -sdk ${UNLEASHED_RECOMP_APPLE_SDK} metal -o ${MSL_FILE_PATH}.ir -c ${MSL_FILE_PATH} -D__air__ ${METAL_DEBUG_FLAGS}
+            DEPENDS ${MSL_FILE_PATH}
+            COMMAND_EXPAND_LISTS
+            VERBATIM
         )
         add_custom_command(
                 OUTPUT ${MSL_FILE_PATH}.metallib
