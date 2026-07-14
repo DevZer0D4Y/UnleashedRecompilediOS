@@ -30,6 +30,33 @@ if (UNLEASHED_RECOMP_IOS)
     endif()
 endif()
 
+# The iOS build skips target-side developer tools, but shader compilation still
+# needs a macOS host executable. Use the prebuilt DXC matching the Mac running
+# CMake rather than the arm64 iOS target architecture.
+if (UNLEASHED_RECOMP_IOS AND NOT DIRECTX_DXC_TOOL AND CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+    string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" UNLEASHED_RECOMP_DXC_HOST_ARCH)
+    if (UNLEASHED_RECOMP_DXC_HOST_ARCH STREQUAL "arm64" OR UNLEASHED_RECOMP_DXC_HOST_ARCH STREQUAL "aarch64")
+        set(UNLEASHED_RECOMP_DXC_HOST_ARCH "arm64")
+    elseif (UNLEASHED_RECOMP_DXC_HOST_ARCH STREQUAL "x86_64" OR UNLEASHED_RECOMP_DXC_HOST_ARCH STREQUAL "amd64")
+        set(UNLEASHED_RECOMP_DXC_HOST_ARCH "x64")
+    else()
+        message(FATAL_ERROR "Unsupported macOS host architecture for DXC: ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+    endif()
+
+    set(UNLEASHED_RECOMP_DXC_ROOT "${UNLEASHED_RECOMP_TOOLS_ROOT}/XenosRecomp/thirdparty/dxc-bin")
+    set(UNLEASHED_RECOMP_DXC_EXECUTABLE "${UNLEASHED_RECOMP_DXC_ROOT}/bin/${UNLEASHED_RECOMP_DXC_HOST_ARCH}/dxc-macos")
+    set(UNLEASHED_RECOMP_DXC_LIBRARY_DIR "${UNLEASHED_RECOMP_DXC_ROOT}/lib/${UNLEASHED_RECOMP_DXC_HOST_ARCH}")
+    if (NOT EXISTS "${UNLEASHED_RECOMP_DXC_EXECUTABLE}" OR
+        NOT EXISTS "${UNLEASHED_RECOMP_DXC_LIBRARY_DIR}/libdxcompiler.dylib")
+        message(FATAL_ERROR "Bundled macOS DXC is missing. Run: git submodule update --init --recursive")
+    endif()
+
+    set(DIRECTX_DXC_TOOL
+        "${CMAKE_COMMAND}" -E env
+        "DYLD_LIBRARY_PATH=${UNLEASHED_RECOMP_DXC_LIBRARY_DIR}"
+        "${UNLEASHED_RECOMP_DXC_EXECUTABLE}")
+endif()
+
 if (UNLEASHED_RECOMP_IOS AND NOT UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM)
     if (DEFINED ENV{DEVELOPMENT_TEAM} AND NOT "$ENV{DEVELOPMENT_TEAM}" STREQUAL "")
         set(UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM "$ENV{DEVELOPMENT_TEAM}" CACHE STRING "Apple Development Team ID for iOS signing" FORCE)
