@@ -16,6 +16,7 @@ option(UNLEASHED_RECOMP_IOS_DETAILED_LOGGING "Enable verbose console and buffere
 option(UNLEASHED_RECOMP_IOS_DUMP_BC7 "Synchronously dump unsupported BC7 textures for offline conversion" OFF)
 option(UNLEASHED_RECOMP_IOS_SIGNPOSTS "Enable low-overhead iOS signposts for Instruments profiling" OFF)
 option(UNLEASHED_RECOMP_METAL_SHADER_DEBUG_INFO "Embed Metal shader source and line tables for GPU debugging" OFF)
+set(UNLEASHED_RECOMP_HOST_FILE_TO_C "" CACHE FILEPATH "Path to a file_to_c executable built for the host Mac")
 set(UNLEASHED_RECOMP_IOS_GUEST_STACK_MIN_KIB "8192" CACHE STRING "Minimum native stack size for an iOS guest thread, in KiB")
 set(UNLEASHED_RECOMP_IOS_GUEST_STACK_MAX_KIB "65536" CACHE STRING "Maximum native stack size for an iOS guest thread, in KiB")
 
@@ -55,6 +56,20 @@ if (UNLEASHED_RECOMP_IOS AND NOT DIRECTX_DXC_TOOL AND CMAKE_HOST_SYSTEM_NAME STR
         "${CMAKE_COMMAND}" -E env
         "DYLD_LIBRARY_PATH=${UNLEASHED_RECOMP_DXC_LIBRARY_DIR}"
         "${UNLEASHED_RECOMP_DXC_EXECUTABLE}")
+endif()
+
+if (UNLEASHED_RECOMP_IOS AND NOT UNLEASHED_RECOMP_HOST_FILE_TO_C)
+    set(UNLEASHED_RECOMP_HOST_FILE_TO_C
+        "${CMAKE_SOURCE_DIR}/out/build/macos-debug/tools/file_to_c/file_to_c"
+        CACHE FILEPATH "Path to a file_to_c executable built for the host Mac" FORCE)
+endif()
+
+if (UNLEASHED_RECOMP_IOS AND NOT EXISTS "${UNLEASHED_RECOMP_HOST_FILE_TO_C}")
+    message(FATAL_ERROR
+        "The iOS build requires the macOS-host file_to_c tool. Run:\n"
+        "  cmake --fresh --preset macos-debug\n"
+        "  cmake --build out/build/macos-debug --target file_to_c\n"
+        "Then configure iOS again.")
 endif()
 
 if (UNLEASHED_RECOMP_IOS AND NOT UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM)
@@ -102,11 +117,22 @@ function(BIN2C)
         return()
     endif()
 
+    if (TARGET file_to_c)
+        set(BIN2C_TOOL "$<TARGET_FILE:file_to_c>")
+        set(BIN2C_TOOL_DEPENDENCY file_to_c)
+    elseif (UNLEASHED_RECOMP_HOST_FILE_TO_C AND EXISTS "${UNLEASHED_RECOMP_HOST_FILE_TO_C}")
+        set(BIN2C_TOOL "${UNLEASHED_RECOMP_HOST_FILE_TO_C}")
+        set(BIN2C_TOOL_DEPENDENCY "${UNLEASHED_RECOMP_HOST_FILE_TO_C}")
+    else()
+        message(FATAL_ERROR "BIN2C requires a file_to_c executable built for the host platform")
+    endif()
+
     add_custom_command(OUTPUT "${BIN2C_ARGS_DEST_FILE}.c"
-        COMMAND $<TARGET_FILE:file_to_c> "${BIN2C_ARGS_SOURCE_FILE}" "${BIN2C_ARGS_ARRAY_NAME}" "${BIN2C_ARGS_COMPRESSION_TYPE}" "${BIN2C_ARGS_DEST_FILE}.c" "${BIN2C_ARGS_DEST_FILE}.h"
-        DEPENDS "${BIN2C_ARGS_SOURCE_FILE}"
+        COMMAND ${BIN2C_TOOL} "${BIN2C_ARGS_SOURCE_FILE}" "${BIN2C_ARGS_ARRAY_NAME}" "${BIN2C_ARGS_COMPRESSION_TYPE}" "${BIN2C_ARGS_DEST_FILE}.c" "${BIN2C_ARGS_DEST_FILE}.h"
+        DEPENDS "${BIN2C_ARGS_SOURCE_FILE}" ${BIN2C_TOOL_DEPENDENCY}
         BYPRODUCTS "${BIN2C_ARGS_DEST_FILE}.h"
         COMMENT "Generating binary header for ${BIN2C_ARGS_SOURCE_FILE}..."
+        VERBATIM
     )
 
     set_source_files_properties(${BIN2C_ARGS_DEST_FILE}.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)

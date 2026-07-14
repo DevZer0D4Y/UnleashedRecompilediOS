@@ -117,7 +117,13 @@ open -a UnleashedRecomp.app
 ```
 
 ### iOS (experimental)
-1. Configure the project with the iOS preset.
+1. Bootstrap the host-side tools and generated guest code. This native macOS step is required once after cloning and whenever the private game inputs or recompilers change.
+```bash
+cmake --fresh --preset macos-debug
+cmake --build ./out/build/macos-debug --target file_to_c UnleashedRecompGenerateArtifacts
+```
+
+2. Configure the project with the iOS preset.
 ```bash
 cmake --preset ios-xcode-debug
 ```
@@ -125,15 +131,15 @@ cmake --preset ios-xcode-debug
 > [!NOTE]
 > The available Xcode presets are `ios-xcode-debug`, `ios-xcode-relwithdebinfo` and `ios-xcode-release`.
 
-2. Build the target.
+3. Build the target.
 ```bash
 cmake --build ./out/build/ios-xcode-debug --config Debug --target UnleashedRecomp
 ```
 
-3. Open the generated Xcode project/build output for signing and deployment to a device.
+4. Open the generated Xcode project/build output for signing and deployment to a device.
 
 ### iOS with Xcode (device install) (recommended)
-1. Configure with the Xcode generator preset.
+1. Complete the host bootstrap from the previous section, then configure with the Xcode generator preset.
 ```bash
 cmake --preset ios-xcode-debug \
 	-DUNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM=YOURTEAMID \

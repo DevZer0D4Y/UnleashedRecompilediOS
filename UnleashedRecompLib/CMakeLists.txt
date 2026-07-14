@@ -45,6 +45,28 @@ foreach(i RANGE 0 260)
     list(APPEND UNLEASHED_RECOMP_PPC_RECOMPILED_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/ppc/ppc_recomp.${i}.cpp")
 endforeach()
 
+if (UNLEASHED_RECOMP_USE_PREGENERATED_RECOMP)
+    set(UNLEASHED_RECOMP_MISSING_GENERATED_SOURCES)
+    foreach(GENERATED_SOURCE IN LISTS UNLEASHED_RECOMP_PPC_RECOMPILED_SOURCES)
+        if (NOT EXISTS "${GENERATED_SOURCE}")
+            list(APPEND UNLEASHED_RECOMP_MISSING_GENERATED_SOURCES "${GENERATED_SOURCE}")
+        endif()
+    endforeach()
+    if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader/shader_cache.cpp")
+        list(APPEND UNLEASHED_RECOMP_MISSING_GENERATED_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/shader/shader_cache.cpp")
+    endif()
+
+    list(LENGTH UNLEASHED_RECOMP_MISSING_GENERATED_SOURCES UNLEASHED_RECOMP_MISSING_GENERATED_SOURCE_COUNT)
+    if (UNLEASHED_RECOMP_MISSING_GENERATED_SOURCE_COUNT GREATER 0)
+        list(GET UNLEASHED_RECOMP_MISSING_GENERATED_SOURCES 0 UNLEASHED_RECOMP_FIRST_MISSING_GENERATED_SOURCE)
+        message(FATAL_ERROR
+            "The iOS build requires pre-generated guest code (${UNLEASHED_RECOMP_MISSING_GENERATED_SOURCE_COUNT} files are missing; first: ${UNLEASHED_RECOMP_FIRST_MISSING_GENERATED_SOURCE}).\n"
+            "Place default.xex, default.xexp, and shader.ar in UnleashedRecompLib/private, then run:\n"
+            "  cmake --fresh --preset macos-debug\n"
+            "  cmake --build out/build/macos-debug --target file_to_c UnleashedRecompGenerateArtifacts")
+    endif()
+endif()
+
 if (NOT UNLEASHED_RECOMP_USE_PREGENERATED_RECOMP)
     add_custom_command(
         OUTPUT 
@@ -98,6 +120,12 @@ if (NOT UNLEASHED_RECOMP_USE_PREGENERATED_RECOMP)
             ${XENOS_RECOMP_SOURCES} 
             ${XENOS_RECOMP_INCLUDE}
         USES_TERMINAL
+    )
+
+    add_custom_target(UnleashedRecompGenerateArtifacts
+        DEPENDS
+            ${UNLEASHED_RECOMP_PPC_RECOMPILED_SOURCES}
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader/shader_cache.cpp"
     )
 endif()
 
