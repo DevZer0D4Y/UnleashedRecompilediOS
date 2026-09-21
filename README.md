@@ -24,11 +24,9 @@ UnleashedRecompiled for iOS is an iOS port of the Xbox 360 version of Sonic Unle
 ## Minimum System Requirements
 
 - CPU with support for the AVX instruction set:
-
-  tested on A16 Bionic, may support older.
+tested on A16 Bionic, may support older.
 - GPU with support for Direct3D 12.0 (Shader Model 6) or Vulkan 1.2:
-
-  A16 Bionic (iPhone 14 Pro) for 61% resolution scale @ 30-60FPS
+A16 Bionic (iPhone 14 Pro) for 61% resolution scale @ 30-60FPS
 - Memory:
   4 GB for iOS, recommend 6.
 - Operating System:
