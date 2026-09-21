@@ -4,16 +4,12 @@
 
 ---
 
-Unleashed Recompiled is an unofficial PC port of the Xbox 360 version of Sonic Unleashed created through the process of static recompilation. The port offers Windows, Linux, macOS and iOS support with numerous built-in enhancements such as high resolutions, ultrawide support, high frame rates, improved performance and modding.
+UnleashedRecompiled for iOS is an iOS port of the Xbox 360 version of Sonic Unleashed created through the process of static recompilation. The port offers iOS support with numerous built-in enhancements such as high resolutions, ultrawide support, high frame rates, improved performance and modding.
 
-**This project does not include any game assets. You must provide the files from your own legally acquired copy of the game to install or build Unleashed Recompiled.**
+**This project does not include any game assets. You must provide the files from your own legally acquired copy of the game to install or build UnleashedRecompiled for iOS.**
 
-**Also, PLEASE DO NOT REPORT ISSUES YOU HAVE WITH THIS BUILD TO THE ORIGINAL UNLEASHED RECOMP REPO! I don't want to be responsible for issue spam over there.**
 
-[Check out the latest release here](https://github.com/hedge-dev/UnleashedRecomp/releases/latest).
-
-[XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) are the main recompilers used for converting the game's original PowerPC code and Xenos shaders into compatible C++ and HLSL code respectively. The development of these recompilers was directly inspired by [N64: Recompiled](https://github.com/N64Recomp/N64Recomp), which was used to create [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
-
+[XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) are the main recompilers used for converting the game's original PowerPC code and Xenos shaders into compatible C++ and HLSL code respectively.
 ## Table of Contents
 
 - [Minimum System Requirements](#minimum-system-requirements)
@@ -28,22 +24,13 @@ Unleashed Recompiled is an unofficial PC port of the Xbox 360 version of Sonic U
 ## Minimum System Requirements
 
 - CPU with support for the AVX instruction set:
-  - Intel: Sandy Bridge (Intel Core 2nd Generation)
-  - AMD: Bulldozer (AMD FX series)
-  - Apple: tested on A16 Bionic, may support older.
+  tested on A16 Bionic, may support older.
 - GPU with support for Direct3D 12.0 (Shader Model 6) or Vulkan 1.2:
-  - NVIDIA: GeForce GT 630 (Kepler)
-  - AMD: Radeon HD 7750 (2012, not the RX 7000)
-  - Intel: HD Graphics 510 (Skylake)
-  - Apple: A16 Bionic (iPhone 14 Pro) for 61% resolution scale @ 30-60FPS
+  Apple: A16 Bionic (iPhone 14 Pro) for 61% resolution scale @ 30-60FPS
 - Memory:
-  - 8 GB minimum
-  - 4 GB for iOS, recommend 6.
+  4 GB for iOS, recommend 6.
 - Operating System:
-  - Windows 10 (version 1909)
-  - A modern Linux distro such as Ubuntu 22.04 LTS
-  - macOS 13.0
-  - iOS 15.0
+  iOS 15.0
 - Storage:
   - With DLC: 10 GiB required
   - Without DLC: 6 GiB required
@@ -77,7 +64,7 @@ Unleashed Recompiled is an unofficial PC port of the Xbox 360 version of Sonic U
     - Xbox 360 USB Dumping Guide
         - [English](/docs/DUMPING-USB-en.md)
 
-3) Download [the latest release](https://github.com/hedge-dev/UnleashedRecomp/releases/latest) of Unleashed Recompiled and extract it to where you'd like the game to be installed.
+3) Download [the latest release](https://github.com/DevZer0D4Y/UnleashedRecompilediOS//releases/latest) of UnleashedRecompiled for iOS and extract it to where you'd like the game to be installed.
 
 4) Run the executable and you will be guided through the installation process. You will be asked to provide the files you acquired in the previous step. When presented with options for how to do this:
 
@@ -102,9 +89,6 @@ A completely new options menu accessible from the title screen or pause menu, wi
 
 You will be rewarded with achievements as you progress through the game just like on its original platform. Achievements are recreated with integrated notifications and a new menu also very faithful to the game's design language. Get all of them and you will be rewarded with a gold trophy!
 
-> [!NOTE]
-> Achievements cannot be used with platforms such as Steam or RetroAchievements.
-
 ### Custom Localization
 
 All of the new menus in the port fully support localization for each of the game's originally supported languages; English, Japanese, German, French, Spanish and Italian. As a bonus, switching the game to Japanese also changes the title screen logo to its original Japanese counterpart.
@@ -128,7 +112,7 @@ Many improvements have been provided to accompany support for higher resolutions
 
 A new renderer was written from scratch to translate the game's draw calls to modern APIs in a highly efficient way while also taking advantage of multi-threading.
 
-As emulation of the Xbox 360's GPU is not required in a recompilation, many decisions were made to skip quirks of the original hardware that are not required in a PC port, resulting in great improvements to performance.
+As emulation of the Xbox 360's GPU is not required in a recompilation, many decisions were made to skip quirks of the original hardware that are not required in an iOS port, resulting in great improvements to performance.
 
 Modern rendering techniques such as bindless textures and shader specialization are also used to maximize the performance on systems with modern hardware whilst also supporting a wide range of lower end hardware.
 
@@ -156,14 +140,9 @@ Support for the D-Pad has been added to various parts of the game, allowing the 
 
 If you have a DualShock 4 or DualSense controller, the LED will dynamically change color depending on the game context and support for the touchpad has been added to the World Map, allowing you to spin the planet freely!
 
-> [!NOTE]
-> LED and touchpad support for the DualShock 4 and DualSense controllers may be limited when using third-party input translation layers (such as DS4Windows or Steam Input). If you're using iOS, this is untested.
->
-> Support for both features may also be limited on Linux.
-
 ### Low Input Latency
 
-Modern input latency reduction techniques are included to improve the game's responsiveness as much as possible, such as support for [Waitable Swap Chains](https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains) in both D3D12 and Vulkan. This methodology was applied directly before the game's input polling to minimize latency. Additionally, the D3D12 backend also supports [Flip Models](https://devblogs.microsoft.com/directx/dxgi-flip-model/), allowing the game to directly present to the screen as quickly as possible.
+Modern input latency reduction techniques are included to improve the game's responsiveness as much as possible.
 
 ### Asynchronous Shader Compilation
 
@@ -190,130 +169,7 @@ Many options have been integrated to address some common quality of life improve
 - Control tutorials (as referred to by current Sonic games) can be disabled to remove button prompts that show up during gameplay to teach the player how to use certain moves.
 - The Werehog's Battle Theme, commonly considered to be an annoyance in the original game due to its frequency and interruption of the stage's background music, can now be disabled.
 - The day/night transformation cutscene in towns can use either the Xbox 360 or PlayStation 3 version, with the Xbox version artificially extending loading times for the full video play out, whilst the PlayStation version ends as soon as it's done loading.
-- Music Attenuation is a feature that was originally present in the Xbox 360 version of the game, where it'd automatically mute the background music if the console's media player was in use. This feature has been implemented using information provided by the [Windows Media Control](https://learn.microsoft.com/en-us/uwp/api/windows.media.control?view=winrt-26100) APIs in [WinRT](https://en.wikipedia.org/wiki/Windows_Runtime). Applications that interface with Windows 10/11 to display media controls are supported.
-
-> [!TIP]
-> You may refer to Music Presence's [list of supported media players](https://github.com/ungive/discord-music-presence/blob/master/documentation/supported-media-players.md) for players that work with Music Attenuation out of the box.
-
-> [!NOTE]
-> Please note that Music Attenuation is not currently available on Linux. Support for this feature may be added in a future update.
-
-### Steam Deck Support
-
-Native Linux builds that work on the Steam Deck out of the box are available. The Flatpak version can be installed directly and added as a non-Steam game easily via Desktop Mode.
-
-Be aware that installing the game on a Steam Deck can be a slow process and can easily consume the Deck's storage on the 64 GB model, so make sure you provide the game's files via external storage, such as a microSD card or a network share if possible.
-
-Performance has been found to improve significantly when the Deck's GPU clock is manually set to its maximum value via Gamescope, even if the game appears to be primarily CPU bottlenecked. Be aware that maintaining the target frame rate may be difficult during demanding sections, such as Werehog combat or DLC stages. Overall, performance is considered to be noticeably better than on the original hardware while using the default settings.
-
-> [!NOTE]
-> It is recommended to perform the installation process while in Desktop Mode, as the [file picker may not be available in Game Mode](#file-picker-unavailable-on-steam-deck-in-game-mode) at all times.
-
-### Mod Support
-
-The game includes a mod loader compatible with [Hedge Mod Manager](https://github.com/thesupersonic16/HedgeModManager). As an option, users looking for Linux support should try the development version of [HMM 8](https://github.com/hedge-dev/HedgeModManager), which should work out of the box on platforms such as the Steam Deck.
-
-The mod format uses the same standard as the one used by Sonic Generations mods. Mods that were originally created for [Unleashed Mod Manager](https://github.com/hyperbx/Unleashed-Mod-Manager) are also supported for the sake of backwards compatibility. However, using this mod format is not recommended in the long term and should now be considered deprecated.
-
-Modded files for the Xbox 360 version of the game are compatible with Unleashed Recompiled. However, some mods may have targeted a version of the game that doesn't contain the title update, so those may have issues and require updates from their authors in order to work with the recompilation. Mods that replace the game's executable file (`default.xex`) or shaders are not supported.
-
-> [!NOTE]
-> Code modding is currently not possible and is [planned for a future update](#code-modding). As a workaround for the time being, some codes have been directly embedded into the game and can be accessed through Hedge Mod Manager's Codes tab.
->
-> For information on the mod format, check out Hedge Mod Manager's [Basic Mod File Structure](https://github.com/thesupersonic16/HedgeModManager/wiki/Basic-Mod-File-Structure) wiki page.
-
-## Update Roadmap
-
-A number of different features are planned for future updates.
-
-### Action Remapping
-
-Options for changing the bindings of the player actions to the controller buttons, as well as support for keyboard bindings. In the meantime, refer to this [question in the FAQ](#what-are-the-keyboard-bindings) for the default keyboard bindings, as well as where to edit them if necessary.
-
-### More Linux Builds
-
-Linux builds that don't require Flatpak will be added in the future when a way to [create the shortcuts required for HedgeModManager](https://github.com/hedge-dev/UnleashedRecomp/issues/451) is implemented. In the meantime, you can access these builds through the [Actions](https://github.com/hedge-dev/UnleashedRecomp/actions) panel or [build them yourself](#building).
-
-### High Frame Rate Fixes
-
-A number of [gameplay issues](#high-frame-rate-glitches) are currently present that will gradually be fixed as more research into how the game works is done. At the moment, the game is considered to be beatable at high frame rates, but you may be required to limit the game to 60 FPS in order to clear some optional content.
-
-### Code Modding
-
-Modifying the code of a recompilation is a fundamentally different process than doing it for a game that only supports one platform on a single executable version. Everyone can build and fork Unleashed Recompiled on their own, which makes the method of targeting a single executable essentially impossible.
-
-A convenient and maintainable method for code modding is under research and will come in a future update, which will work consistently across all the platforms that Unleashed Recompiled currently supports.
-
-In the meantime, those interested in doing extensive code modding are recommended to fork the repository and introduce their changes in preparation for the code modding update.
-
-### Stance on New Features
-
-The team behind Unleashed Recompiled is committed to preserving the game's original design as best as possible. Additional features that don't fit the vision of the project will be left to mods or forks to cover. As such, requests for such features will not be considered. If you request a new feature, make sure it makes sense within the design of the original game and fits the goal of delivering a PC version of the game.
-
-## Known Issues
-
-### Unavoidable Stutters
-
-While Unleashed Recompiled does its best effort on fixing any hitches and stutters that could originate from the translation process, some problems are not possible to fix due to the way the game was built.
-
-Even if the recompilation process introduces a small overhead, the game does not perform some tasks in an asynchronous way. These stutters exist on original hardware, but are much more noticeable when targeting higher frame rates.
-
-Most of the known stutters are related to the game loading in layers of new objects at certain points in stages, spawning in particle systems or playing multiple sound effects. These operations can produce pauses that can last almost 10 milliseconds, even on powerful hardware. These hitches are much easier to notice when targeting frame rates such as 120 FPS, where one frame only lasts around 8 milliseconds.
-
-These problems are not possible to mitigate without further research into how the game works and will remain a goal for future updates to fix if possible. However, [as mentioned in the FAQ](#how-can-i-improve-performance), it's been found that these stutters can be significantly mitigated by playing on Linux, possibly due to the amount of synchronization primitives used by the game when these operations are performed.
-
-### High Frame Rate Glitches
-
-Sonic Unleashed is not a game that runs at a fixed rate on any of its target platforms. While it does target 30 FPS on Xbox 360 and is uncapped on PlayStation 3, it doesn't exactly hit these targets often depending on the area, and if it does, the time step itself is subject to large deviations. The game's programming simply follows the time step as closely as possible, which means inconsistencies in the time step are impossible to reproduce without targeting one exact piece of hardware.
-
-A lot of the bugs present in the game can largely be explained by sudden spikes in frame times. To make matters worse, some bugs were found to be present only if the frame rate is too stable, such as this [infamous bug](https://github.com/hedge-dev/UnleashedRecomp/issues/100) that shows up in the Wii version of the game because the cutscene was recorded with a fixed time step.
-
-Unleashed Recompiled features a vast amount of fixes for issues that present themselves when targeting high frame rates, but fixing *all of them* is too big of a task without more knowledge of how the game works. It is possible that these issues will be fixed in the future or that alternative solutions such as transform interpolation are implemented instead.
-
-If you encounter game breaking bugs or unplayable sections, try temporarily limiting the frame rate to resolve them. Also, check the [Issues](https://github.com/hedge-dev/UnleashedRecomp/issues) page for any existing reports.
-
-### Ultrawide Visual Issues
-
-Visual oddities may occur when unlocking the aspect ratio during cutscenes, as the game was not designed for wider formats. Adjusting these scenes can be subjective, so it will be up to mods to address these issues, as they require modifying the game's animations and object placement within cutscene files.
-
-### Original Game Bugs
-
-Game bugs present on the original hardware are intentionally preserved and will not be fixed. Please do not report issues for these bugs and verify that the issue does not occur on original hardware before reporting. Bug reports for issues found in the original game will be rejected. Bugs that only happen in Unleashed Recompiled must be accompanied by footage captured on original Xbox 360 hardware showing that the bug does not happen there.
-
-### File Picker Unavailable on Steam Deck in Game Mode
-
-Due to some restrictions of how the desktop environment on the Steam Deck works whilst in Game Mode, please note that you may need to at least first boot into Desktop Mode to be able to use the file picker to provide the game files.
-
-Simply booting at least once in Desktop Mode will enable the Deck to use the file picker when going back to Game Mode. You can complete the entire installation process while in Desktop Mode to save yourself the trouble of browsing through Game Mode if necessary.
-
-### Broken Textures on iOS
-
-This is a hardware issue with iOS not supporting BC7 textures. Every time you encounter a texture that the game can't decode, it will dump it to UnleashedRecomp/bc7_dump, named after the hash of the texture. If you go to a tool like NVIDIA Texture Tools Exporter and convert it to a format such as BC3, you can put it in UnleashedRecomp/bc7_override and it will then load the texture from there.
-
-### iOS Build Crashing after long playtime/exiting to menu and returning to gameplay a few times
-
-This is an issue with how memory management is handled on iOS, basically the game can't free memory properly and memory usage grows over time, with the problem being made FAR worse while running with a debugger. For most gameplay, this shouldn't be an issue as it doesn't grow very fast unless the gameplay state is loaded multiple times.
-
-Why it grows even faster on a debugger, I have no clue. If you can figure it out, please submit a PR.
->Update:
->This may be fixed??? I didn't change anything other than compiling with -O2 but the memory usage without a debugger may have gone away.
-
-### iOS IPA does not work past installer
-
-I genuninely have no clue what's causing this, as the logging just entirely dies but the app doesn't somehow. If you have some clue what the heck is happening with this (I suspect it's something to do with the Metal handoff when the program soft restarts) PLEASE open an issue or a PR.
-
-## FAQ
-
-### Do you have a website or Discord server?
-
-Unleashed Recompiled does not have an official website, nor is it affiliated with any Discord servers.
-
-**Please link here when directing anyone to the project.**
-
-> [!CAUTION]
-> Do not download builds of Unleashed Recompiled from anywhere but our [Releases](https://github.com/hedge-dev/UnleashedRecomp/releases/latest) page.
->
-> **We will never distribute builds on other websites, via Discord servers or via third-party update tools.**
+- Music Attenuation is a feature that was originally present in the Xbox 360 version of the game, where it'd automatically mute the background music if the console's media player was in use.
 
 ### Why does the installer say my files are invalid?
 
@@ -329,108 +185,17 @@ The installer may display this error for several reasons. Please check the follo
 
 - The installer will only accept **original and unmodified files**. Do not attempt to provide modified files to the installer.
 
-### What are the keyboard bindings?
-
-Pad|Key
--|-
-A (Cross)|S
-B (Circle)|D
-X (Square)|A
-Y (Triangle)|W
-D-Pad - Up|Unbound
-D-Pad - Down|Unbound
-D-Pad - Left|Unbound
-D-Pad - Right|Unbound
-Start|Return
-Back (Select)|Backspace
-Left Trigger (L2)|1
-Right Trigger (R2)|3
-Left Bumper (L1)|Q
-Right Bumper (R1)|E
-Left Stick - Up|Up Arrow
-Left Stick - Down|Down Arrow
-Left Stick - Left|Left Arrow
-Left Stick - Right|Right Arrow
-Right Stick - Up|Unbound
-Right Stick - Down|Unbound
-Right Stick - Left|Unbound
-Right Stick - Right|Unbound
-
----
-
-You can change the keyboard bindings by editing `config.toml` located in the [configuration directory](#where-is-the-save-data-and-configuration-file-stored), although using a controller is highly recommended until [Action Remapping](#action-remapping) is added in a future update.
-
-Refer to the left column of [this enum template](https://github.com/hedge-dev/UnleashedRecomp/blob/main/UnleashedRecomp/user/config.cpp#L40) for a list of valid keys.
-
-*The default keyboard layout is based on Devil's Details' keyboard layout for Sonic Generations (2011)*.
-
 ### I can't do anything on iOS, what are the controls?
 
-Currently, there are no touch controls for iOS implemented outside of the installer. If you'd like them, please make an issue if there's not one already and I can probably add some basic ones, but for now I'll be moving on to another project so a controller is REQUIRED.
-
-### Where is the save data and configuration file stored?
-
-The save data and configuration files are stored at the following locations:
-
-- Windows: `%APPDATA%\UnleashedRecomp\`
-- Linux: `~/.config/UnleashedRecomp/`
-- macOS: `~/Library/Application Support/UnleashedRecomp/`
-- iOS: `On My iPhone/Unleashed/UnleashedRecomp/`
-
-You will find the save data under the `save` folder (or `mlsave`, if using Hedge Mod Manager's save file redirection). The configuration file is named `config.toml`.
+Currently, there are no touch controls for iOS implemented outside of the installer. If you'd like them, please make a feature suggestion in my discord (if there's not one already and I can probably add some basic ones), but for now I have no plans on doing them.
 
 ### I want to update the game. How can I avoid losing my save data? Do I need to reinstall the game?
 
-Updating the game can be done by simply copying and replacing the files from a [release](https://github.com/hedge-dev/UnleashedRecomp/releases) on top of your existing installation. **Your save data and configuration will not be lost.** You won't need to reinstall the game, as the game files will always remain the same across versions of Unleashed Recompiled.
+Updating the game can be done by simply installing the newer .ipa on top of your existing installation. **Your save data and configuration will not be lost.** You won't need to reinstall the game, as the game files will always remain the same across versions of UnleashedRecompiled for iOS.
 
 ### How can I force the game to store the save data and configuration in the installation folder?
 
 You can make the game ignore the [default configuration paths](#where-is-the-save-data-and-configuration-file-stored) and force it to save everything in the installation directory by creating an empty `portable.txt` file. You are directly responsible for the safekeeping of your save data and configuration if you choose this option.
-
-### How can I install mods?
-
-**Do not install mods by modifying the game data**. Use [Hedge Mod Manager](https://github.com/thesupersonic16/HedgeModManager) instead. You will not get support for modifying your game files directly.
-
-> [!WARNING]
-> Unleashed Mod Manager is not recommended for use with Unleashed Recompiled, as it can make permanent changes to your game files.
-
-### How can I force the game to run the installation again?
-
-While it's unlikely you'll need to do this unless you've modified your game files by accident, you can force the installer to run again by using the launch argument: `--install`.
-
-### How can I force the game to run under X11 or Wayland?
-
-Use either of the following arguments to force SDL to run under the video driver you want:
-
-- X11: `--sdl-video-driver x11`
-- Wayland: `--sdl-video-driver wayland`
-
-The second argument will be passed directly to SDL as a hint to try to initialize the game with your preferred option.
-
-### Where is the game data for the Flatpak version installed?
-
-Given it is not possible to run the game where the Flatpak is stored, the game data will be installed to `~/.var/app/io.github.hedge_dev.unleashedrecomp/data`. The Flatpak build will only recognize this directory as valid. Feel free to reuse this data directory with a native Linux build if you wish to switch in the future.
-
-If you wish to move this data to another location, you can do so by creating a symlink from this directory to the one where you'll migrate your installation to.
-
-### How can I improve performance?
-
-You can lower the values of some of the following graphics options to improve performance. Other options may help, but these usually have the biggest impact:
-
-- Resolution Scale
-- Anti-Aliasing
-- Shadow Resolution
-
-If you want a detailed performance report along with relevant system information, press F1 to view multiple performance graphs. This will aid in the process of gathering as much information as possible in order to identify the problem.
-
-When using a system with multiple GPUs (such as a gaming laptop), please make sure that the game has chosen your dedicated graphics adapter and not your integrated one. The F1 menu will display which device has been selected by its name along with other options that might be available. If you're unable to get the game to select the correct device, you can attempt to override this by changing the `GraphicsDevice` property in `config.toml`. The name of the device must be an exact match.
-
-Some of the game's more demanding sections require strong CPU single-thread performance. While the recompilation process adds minimal CPU overhead, modern hardware is typically bottlenecked by this factor before the GPU.
-
-Linux has an unexpected advantage when it comes to CPU performance, showing improvements in CPU-bound scenarios. It's currently speculated that this could be due to the heavy amount of thread synchronization the game performs, an operation that is likely to be more performant on Linux's CPU scheduler than on Windows' scheduler. If you wish to gain some additional performance, playing on Linux instead of Windows could yield better results.
-
-> [!WARNING]
-> Using external frame rate limiters or performance overlays may degrade performance or have negative consequences.
 
 ### Can I install the game with a PlayStation 3 copy?
 
@@ -440,30 +205,17 @@ Linux has an unexpected advantage when it comes to CPU performance, showing impr
 
 The Japanese version of Sonic Unleashed has some minor differences in both file structure and content that make this version of the game incompatible with the international release. Furthermore, the US and EU versions of the game already support Japanese. Supporting this version would only cause mod compatibility issues in the future, so it is unlikely to be added to the update roadmap as it would also require its own recompilation.
 
-### Why is the game detecting my PlayStation controller as an Xbox controller?
-
-If you're using a third-party input translation layer (such as DS4Windows or Steam Input), it is recommended that you disable these for full controller support.
-
 ### Will macOS be supported?
 
-~~While macOS is not currently on the roadmap, this project welcomes any effort to add support for this platform. Unleashed Recompiled relies on [plume](https://github.com/renderbag/plume), a rendering hardware abstraction layer that will be getting support for Metal in the near future. You can join the macOS discussion on [this issue](https://github.com/hedge-dev/UnleashedRecomp/issues/455).~~
-
-macOS is now officially supported in this fork!
+macOS is officially supported in this fork.
 
 ### What other platforms will be supported?
 
-This project does not plan to support any more platforms other than Windows, Linux and potentially macOS at the moment. Any contributors who wish to support more platforms should do so through a fork.
-
->[!NOTE]
-> Both macOS and iOS are supported in this fork!
+This project does not plan to support any more platforms other than iOS and macOS at the moment. Any contributors who wish to support more platforms should do so through my discord.
 
 ### Do you have plans to recompile other Xbox 360 games or Sonic games?
 
-The team behind Unleashed Recompiled does not currently have any plans to port more Xbox 360 games or Sonic games. Anyone is free to look into [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) if they wish to investigate these opportunities.
-
-## Building
-
-[Check out the building instructions here](/docs/BUILDING.md).
+After Minecraft Xbox 360 Edition for iOS and Sonic Unleashed for iOS, maybe a Toy Story 3 port could be made.
 
 ## Credits
 
@@ -503,16 +255,3 @@ The team behind Unleashed Recompiled does not currently have any plans to port m
 - [brianuuuSonic](https://github.com/brianuuu): Provided Japanese localization for the custom menus.
 
 - [Kitzuku](https://github.com/Kitzuku): Provided German localization for the custom menus.
-
-### Special Thanks
-- [Mr-Wiseguy](https://github.com/Mr-Wiseguy): Creator of [N64: Recompiled](https://github.com/N64Recomp/N64Recomp), which was the inspiration behind the creation of this project. Provided information and assistance at the beginning of development.
-
-- [xenia-project](https://github.com/xenia-project/xenia): Extraordinary amounts of research regarding the inner workings of the Xbox 360, which sped up the development of the recompilation.
-
-- [Katlin Daigler](https://katlindaigler.carbonmade.com): Provided consultation for logo design.
-
-- [ocornut](https://github.com/ocornut): Creator of [Dear ImGui](https://github.com/ocornut/imgui), which is used as the backbone of the custom menus.
-
-- Raymond Chen: Useful resources on Windows application development with his blog ["The Old New Thing"](https://devblogs.microsoft.com/oldnewthing/).
-
-- [Loganbogan9](https://github.com/Loganbogan9): Inspired the iOS port. Happy birthday buddy, hope you enjoy the present. -[NerunSmarts](https://github.com/NerunSmarts)
