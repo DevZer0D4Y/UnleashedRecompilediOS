@@ -10,6 +10,15 @@ UnleashedRecompiled for iOS is an iOS port of the Xbox 360 version of Sonic Unle
 
 
 [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) are the main recompilers used for converting the game's original PowerPC code and Xenos shaders into compatible C++ and HLSL code respectively.
+
+If you want to support me and remain up-to-date about this and other projects, you can in different ways:
+
+Ko-Fi: https://ko-fi.com/dev_zer0
+
+Discord: https://discord.gg/uFChheZEWX
+
+YouTube: https://www.youtube.com/@develop_erZ
+
 ## Table of Contents
 
 - [Minimum System Requirements](#minimum-system-requirements)
