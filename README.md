@@ -15,10 +15,6 @@ UnleashedRecompiled for iOS is an iOS port of the Xbox 360 version of Sonic Unle
 - [Minimum System Requirements](#minimum-system-requirements)
 - [How to Install](#how-to-install)
 - [Features](#features)
-- [Update Roadmap](#update-roadmap)
-- [Known Issues](#known-issues)
-- [FAQ](#faq)
-- [Building](#building)
 - [Credits](#credits)
 
 ## Minimum System Requirements
