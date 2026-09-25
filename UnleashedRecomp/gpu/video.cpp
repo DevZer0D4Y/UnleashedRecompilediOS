@@ -1,5 +1,6 @@
 #include "video.h"
 
+#include "bc_decoder.h"
 #include "imgui/imgui_common.h"
 #include "imgui/imgui_snapshot.h"
 #include "imgui/imgui_font_builder.h"
@@ -35,11 +36,17 @@
 #include <os/logger.h>
 #include <os/process.h>
 
+#include <array>
+#include <cmath>
 #include <cstdlib>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #include <mach/mach.h>
+#endif
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#include "ios_metal.h"
 #endif
 
 #if defined(ASYNC_PSO_DEBUG) || defined(PSO_CACHING)
@@ -333,6 +340,9 @@ static std::unique_ptr<RenderInterface> g_interface;
 static std::unique_ptr<RenderDevice> g_device;
 
 static RenderDeviceCapabilities g_capabilities;
+
+// Set when the GPU cannot sample BC textures (e.g. most iOS devices). These get decoded on the CPU instead.
+static bool g_decodeBCTextures = false;
 
 static constexpr size_t NUM_FRAMES = 2;
 static constexpr size_t NUM_QUERIES = 2;
@@ -1937,6 +1947,11 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
 #endif
 
     g_capabilities = g_device->getCapabilities();
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    g_decodeBCTextures = !ios_metal::SupportsBCTextureCompression();
+    LOGFN("BC texture compression: {}", g_decodeBCTextures ? "unsupported, textures will be decoded on the CPU" : "supported");
+#endif
 
     LoadEmbeddedResources();
 
@@ -5923,65 +5938,104 @@ static RenderFormat ConvertDXGIFormat(ddspp::DXGIFormat format)
     }
 }
 
-static bool IsBCFormat(RenderFormat format)
+struct BCDecodeInfo
+{
+    bc::Format format;
+    RenderFormat decodedFormat;
+    bool srgb;
+};
+
+static bool GetBCDecodeInfo(RenderFormat format, BCDecodeInfo& info)
 {
     switch (format)
     {
     case RenderFormat::BC1_TYPELESS:
     case RenderFormat::BC1_UNORM:
+        info = { bc::Format::BC1, RenderFormat::R8G8B8A8_UNORM, false };
+        return true;
     case RenderFormat::BC1_UNORM_SRGB:
+        info = { bc::Format::BC1, RenderFormat::R16G16B16A16_UNORM, true };
+        return true;
     case RenderFormat::BC2_TYPELESS:
     case RenderFormat::BC2_UNORM:
+        info = { bc::Format::BC2, RenderFormat::R8G8B8A8_UNORM, false };
+        return true;
     case RenderFormat::BC2_UNORM_SRGB:
+        info = { bc::Format::BC2, RenderFormat::R16G16B16A16_UNORM, true };
+        return true;
     case RenderFormat::BC3_TYPELESS:
     case RenderFormat::BC3_UNORM:
+        info = { bc::Format::BC3, RenderFormat::R8G8B8A8_UNORM, false };
+        return true;
     case RenderFormat::BC3_UNORM_SRGB:
+        info = { bc::Format::BC3, RenderFormat::R16G16B16A16_UNORM, true };
+        return true;
     case RenderFormat::BC4_TYPELESS:
     case RenderFormat::BC4_UNORM:
+        info = { bc::Format::BC4_UNORM, RenderFormat::R8_UNORM, false };
+        return true;
     case RenderFormat::BC4_SNORM:
+        info = { bc::Format::BC4_SNORM, RenderFormat::R8_SNORM, false };
+        return true;
     case RenderFormat::BC5_TYPELESS:
     case RenderFormat::BC5_UNORM:
+        info = { bc::Format::BC5_UNORM, RenderFormat::R8G8_UNORM, false };
+        return true;
     case RenderFormat::BC5_SNORM:
+        info = { bc::Format::BC5_SNORM, RenderFormat::R8G8_SNORM, false };
+        return true;
     case RenderFormat::BC6H_TYPELESS:
     case RenderFormat::BC6H_UF16:
+        info = { bc::Format::BC6H_UF16, RenderFormat::R16G16B16A16_FLOAT, false };
+        return true;
     case RenderFormat::BC6H_SF16:
+        info = { bc::Format::BC6H_SF16, RenderFormat::R16G16B16A16_FLOAT, false };
+        return true;
     case RenderFormat::BC7_TYPELESS:
     case RenderFormat::BC7_UNORM:
+        info = { bc::Format::BC7, RenderFormat::R8G8B8A8_UNORM, false };
+        return true;
     case RenderFormat::BC7_UNORM_SRGB:
+        info = { bc::Format::BC7, RenderFormat::R16G16B16A16_UNORM, true };
         return true;
     default:
         return false;
     }
 }
 
-static bool IsBC1Format(RenderFormat format)
+static void DecodeBCSurface(const BCDecodeInfo& info, const uint8_t* src, uint32_t width, uint32_t height, uint8_t* dst, uint32_t dstRowPitch)
 {
-    return (format == RenderFormat::BC1_UNORM) || (format == RenderFormat::BC1_UNORM_SRGB) || (format == RenderFormat::BC1_TYPELESS);
-}
+    if (!info.srgb)
+    {
+        bc::DecodeSurface(info.format, src, width, height, dst, dstRowPitch);
+        return;
+    }
 
-static bool IsBC3Format(RenderFormat format)
-{
-    return (format == RenderFormat::BC3_UNORM) || (format == RenderFormat::BC3_UNORM_SRGB) || (format == RenderFormat::BC3_TYPELESS);
-}
+    // There is no 8-bit sRGB render format, so sRGB textures get converted to linear 16-bit to keep their precision.
+    static const auto s_srgbToLinear = []
+    {
+        std::array<uint16_t, 256> table{};
+        for (size_t i = 0; i < table.size(); i++)
+        {
+            double value = double(i) / 255.0;
+            value = (value <= 0.04045) ? (value / 12.92) : std::pow((value + 0.055) / 1.055, 2.4);
+            table[i] = uint16_t(std::lround(value * 65535.0));
+        }
 
-static bool IsBC2Format(RenderFormat format)
-{
-    return (format == RenderFormat::BC2_UNORM) || (format == RenderFormat::BC2_UNORM_SRGB) || (format == RenderFormat::BC2_TYPELESS);
-}
+        return table;
+    }();
 
-static bool IsBC4Format(RenderFormat format)
-{
-    return (format == RenderFormat::BC4_UNORM) || (format == RenderFormat::BC4_SNORM) || (format == RenderFormat::BC4_TYPELESS);
-}
+    std::vector<uint8_t> rgba(size_t(width) * height * 4);
+    bc::DecodeSurface(info.format, src, width, height, rgba.data(), size_t(width) * 4);
 
-static bool IsBC5Format(RenderFormat format)
-{
-    return (format == RenderFormat::BC5_UNORM) || (format == RenderFormat::BC5_SNORM) || (format == RenderFormat::BC5_TYPELESS);
-}
+    for (uint32_t y = 0; y < height; y++)
+    {
+        const uint8_t* srcRow = rgba.data() + size_t(y) * width * 4;
+        uint16_t* dstRow = reinterpret_cast<uint16_t*>(dst + size_t(y) * dstRowPitch);
 
-static bool IsBC7Format(RenderFormat format)
-{
-    return (format == RenderFormat::BC7_UNORM) || (format == RenderFormat::BC7_UNORM_SRGB) || (format == RenderFormat::BC7_TYPELESS);
+        for (uint32_t i = 0; i < width * 4; i++)
+            dstRow[i] = ((i & 3) == 3) ? uint16_t(srcRow[i] * 257) : s_srgbToLinear[srcRow[i]];
+    }
 }
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
@@ -5990,9 +6044,18 @@ static std::filesystem::path GetBC7OverrideDir()
     return GetGamePath() / "bc7_override";
 }
 
-static std::filesystem::path GetBC7DumpDir()
+// Overrides are looked up by hashing the texture data, which is too slow to do for every
+// texture load, so only do it when the user has actually provided any.
+static bool HasBC7Overrides()
 {
-    return GetGamePath() / "bc7_dump";
+    static const bool s_hasOverrides = []
+    {
+        std::error_code ec;
+        std::filesystem::directory_iterator iterator(GetBC7OverrideDir(), ec);
+        return !ec && iterator != std::filesystem::directory_iterator();
+    }();
+
+    return s_hasOverrides;
 }
 
 static std::filesystem::path BuildHashedBC7Path(const std::filesystem::path& directory, uint64_t hash)
@@ -6032,275 +6095,7 @@ static uint64_t HashTextureData(const uint8_t* data, size_t size)
 
     return hash;
 }
-
-static void DumpBC7TextureForOfflineDecode(const uint8_t* data, size_t dataSize, const ddspp::Descriptor& ddsDesc)
-{
-    static Mutex s_dumpMutex;
-    static ankerl::unordered_dense::set<uint64_t> s_dumpedHashes;
-
-    if (data == nullptr || dataSize <= ddsDesc.headerSize)
-        return;
-
-    const uint64_t hash = HashTextureData(data, dataSize);
-
-    {
-        std::lock_guard<Mutex> lock(s_dumpMutex);
-        auto [it, inserted] = s_dumpedHashes.emplace(hash);
-        if (!inserted)
-            return;
-    }
-
-    std::filesystem::path dumpDir = GetBC7DumpDir();
-    std::error_code ec;
-    std::filesystem::create_directories(dumpDir, ec);
-    if (ec)
-        return;
-
-    std::filesystem::path filePath = BuildHashedBC7Path(dumpDir, hash);
-
-    std::ofstream file(filePath, std::ios::binary | std::ios::trunc);
-    if (!file)
-        return;
-
-    file.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(dataSize));
-    if (!file)
-        return;
-
-    os::logger::Log(fmt::format("Dumped BC7 DDS for offline decode: {}", filePath.string()));
-}
 #endif
-
-static inline uint8_t Expand5To8(uint32_t value)
-{
-    return uint8_t((value << 3) | (value >> 2));
-}
-
-static inline uint8_t Expand6To8(uint32_t value)
-{
-    return uint8_t((value << 2) | (value >> 4));
-}
-
-static void DecodeBC1ColorBlock(const uint8_t* block, uint8_t outRGBA[16 * 4])
-{
-    uint16_t c0 = uint16_t(block[0] | (uint16_t(block[1]) << 8));
-    uint16_t c1 = uint16_t(block[2] | (uint16_t(block[3]) << 8));
-
-    uint8_t colors[4][4] = {};
-
-    colors[0][0] = Expand5To8((c0 >> 11) & 0x1F);
-    colors[0][1] = Expand6To8((c0 >> 5) & 0x3F);
-    colors[0][2] = Expand5To8(c0 & 0x1F);
-    colors[0][3] = 255;
-
-    colors[1][0] = Expand5To8((c1 >> 11) & 0x1F);
-    colors[1][1] = Expand6To8((c1 >> 5) & 0x3F);
-    colors[1][2] = Expand5To8(c1 & 0x1F);
-    colors[1][3] = 255;
-
-    if (c0 > c1)
-    {
-        for (uint32_t i = 0; i < 3; i++)
-        {
-            colors[2][i] = uint8_t((2 * colors[0][i] + colors[1][i]) / 3);
-            colors[3][i] = uint8_t((colors[0][i] + 2 * colors[1][i]) / 3);
-        }
-        colors[2][3] = 255;
-        colors[3][3] = 255;
-    }
-    else
-    {
-        for (uint32_t i = 0; i < 3; i++)
-            colors[2][i] = uint8_t((colors[0][i] + colors[1][i]) / 2);
-
-        colors[2][3] = 255;
-        colors[3][0] = 0;
-        colors[3][1] = 0;
-        colors[3][2] = 0;
-        colors[3][3] = 0;
-    }
-
-    uint32_t indices = uint32_t(block[4]) | (uint32_t(block[5]) << 8) | (uint32_t(block[6]) << 16) | (uint32_t(block[7]) << 24);
-
-    for (uint32_t pixel = 0; pixel < 16; pixel++)
-    {
-        uint32_t colorIndex = (indices >> (pixel * 2)) & 0x3;
-        uint8_t* dst = outRGBA + (pixel * 4);
-        dst[0] = colors[colorIndex][0];
-        dst[1] = colors[colorIndex][1];
-        dst[2] = colors[colorIndex][2];
-        dst[3] = colors[colorIndex][3];
-    }
-}
-
-static void DecodeBC4Block(const uint8_t* block, uint8_t outValues[16])
-{
-    uint8_t v0 = block[0];
-    uint8_t v1 = block[1];
-
-    uint8_t table[8] = {};
-    table[0] = v0;
-    table[1] = v1;
-
-    if (v0 > v1)
-    {
-        table[2] = uint8_t((6 * v0 + 1 * v1) / 7);
-        table[3] = uint8_t((5 * v0 + 2 * v1) / 7);
-        table[4] = uint8_t((4 * v0 + 3 * v1) / 7);
-        table[5] = uint8_t((3 * v0 + 4 * v1) / 7);
-        table[6] = uint8_t((2 * v0 + 5 * v1) / 7);
-        table[7] = uint8_t((1 * v0 + 6 * v1) / 7);
-    }
-    else
-    {
-        table[2] = uint8_t((4 * v0 + 1 * v1) / 5);
-        table[3] = uint8_t((3 * v0 + 2 * v1) / 5);
-        table[4] = uint8_t((2 * v0 + 3 * v1) / 5);
-        table[5] = uint8_t((1 * v0 + 4 * v1) / 5);
-        table[6] = 0;
-        table[7] = 255;
-    }
-
-    uint64_t indices = 0;
-    for (uint32_t i = 0; i < 6; i++)
-        indices |= (uint64_t(block[2 + i]) << (8 * i));
-
-    for (uint32_t p = 0; p < 16; p++)
-        outValues[p] = table[(indices >> (3 * p)) & 0x7];
-}
-
-static bool DecodeBCToRGBA8Mip0(const uint8_t* data, const ddspp::Descriptor& ddsDesc, RenderFormat format, std::vector<uint8_t>& outRGBA)
-{
-    if (ddsDesc.type != ddspp::Texture2D || ddsDesc.arraySize != 1 || ddsDesc.depth != 1)
-        return false;
-
-    if (!IsBC1Format(format) && !IsBC2Format(format) && !IsBC3Format(format) && !IsBC4Format(format) && !IsBC5Format(format))
-        return false;
-
-    uint32_t width = ddsDesc.width;
-    uint32_t height = ddsDesc.height;
-
-    if (width == 0 || height == 0)
-        return false;
-
-    outRGBA.assign(size_t(width) * size_t(height) * 4, 0);
-
-    const uint8_t* src = data + ddsDesc.headerSize;
-    const uint32_t blocksX = (width + 3) / 4;
-    const uint32_t blocksY = (height + 3) / 4;
-    const uint32_t blockSize = IsBC1Format(format) || IsBC4Format(format) ? 8 : 16;
-
-    uint8_t rgbaBlock[16 * 4] = {};
-    uint8_t alphaBlock[16] = {};
-    uint8_t greenBlock[16] = {};
-
-    for (uint32_t by = 0; by < blocksY; by++)
-    {
-        for (uint32_t bx = 0; bx < blocksX; bx++)
-        {
-            const uint8_t* block = src + size_t(by * blocksX + bx) * blockSize;
-
-            if (IsBC1Format(format))
-            {
-                DecodeBC1ColorBlock(block, rgbaBlock);
-            }
-            else if (IsBC2Format(format))
-            {
-                DecodeBC1ColorBlock(block + 8, rgbaBlock);
-
-                for (uint32_t p = 0; p < 16; p++)
-                {
-                    uint8_t packed = block[p / 2];
-                    uint8_t a4 = (p & 1) ? (packed >> 4) : (packed & 0x0F);
-                    rgbaBlock[p * 4 + 3] = uint8_t((a4 << 4) | a4);
-                }
-            }
-            else if (IsBC3Format(format))
-            {
-                uint8_t a0 = block[0];
-                uint8_t a1 = block[1];
-
-                uint8_t alphaTable[8] = {};
-                alphaTable[0] = a0;
-                alphaTable[1] = a1;
-
-                if (a0 > a1)
-                {
-                    alphaTable[2] = uint8_t((6 * a0 + 1 * a1) / 7);
-                    alphaTable[3] = uint8_t((5 * a0 + 2 * a1) / 7);
-                    alphaTable[4] = uint8_t((4 * a0 + 3 * a1) / 7);
-                    alphaTable[5] = uint8_t((3 * a0 + 4 * a1) / 7);
-                    alphaTable[6] = uint8_t((2 * a0 + 5 * a1) / 7);
-                    alphaTable[7] = uint8_t((1 * a0 + 6 * a1) / 7);
-                }
-                else
-                {
-                    alphaTable[2] = uint8_t((4 * a0 + 1 * a1) / 5);
-                    alphaTable[3] = uint8_t((3 * a0 + 2 * a1) / 5);
-                    alphaTable[4] = uint8_t((2 * a0 + 3 * a1) / 5);
-                    alphaTable[5] = uint8_t((1 * a0 + 4 * a1) / 5);
-                    alphaTable[6] = 0;
-                    alphaTable[7] = 255;
-                }
-
-                uint64_t alphaIndices = 0;
-                for (uint32_t i = 0; i < 6; i++)
-                    alphaIndices |= (uint64_t(block[2 + i]) << (8 * i));
-
-                for (uint32_t p = 0; p < 16; p++)
-                    alphaBlock[p] = alphaTable[(alphaIndices >> (3 * p)) & 0x7];
-
-                DecodeBC1ColorBlock(block + 8, rgbaBlock);
-                for (uint32_t p = 0; p < 16; p++)
-                    rgbaBlock[p * 4 + 3] = alphaBlock[p];
-            }
-            else if (IsBC4Format(format))
-            {
-                DecodeBC4Block(block, alphaBlock);
-                for (uint32_t p = 0; p < 16; p++)
-                {
-                    rgbaBlock[p * 4 + 0] = alphaBlock[p];
-                    rgbaBlock[p * 4 + 1] = 0;
-                    rgbaBlock[p * 4 + 2] = 0;
-                    rgbaBlock[p * 4 + 3] = 255;
-                }
-            }
-            else if (IsBC5Format(format))
-            {
-                DecodeBC4Block(block, alphaBlock);
-                DecodeBC4Block(block + 8, greenBlock);
-
-                for (uint32_t p = 0; p < 16; p++)
-                {
-                    rgbaBlock[p * 4 + 0] = alphaBlock[p];
-                    rgbaBlock[p * 4 + 1] = greenBlock[p];
-                    rgbaBlock[p * 4 + 2] = 0;
-                    rgbaBlock[p * 4 + 3] = 255;
-                }
-            }
-            else
-            {
-                return false;
-            }
-
-            for (uint32_t py = 0; py < 4; py++)
-            {
-                for (uint32_t px = 0; px < 4; px++)
-                {
-                    uint32_t x = bx * 4 + px;
-                    uint32_t y = by * 4 + py;
-                    if (x >= width || y >= height)
-                        continue;
-
-                    size_t dstPixel = (size_t(y) * size_t(width) + x) * 4;
-                    size_t srcPixel = (size_t(py) * 4 + px) * 4;
-                    memcpy(&outRGBA[dstPixel], &rgbaBlock[srcPixel], 4);
-                }
-            }
-        }
-    }
-
-    return true;
-}
 
 static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataSize, RenderComponentMapping componentMapping, bool forceCubeMap = false, std::string_view sourceName = {})
 {
@@ -6320,123 +6115,47 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
         desc.format = ConvertDXGIFormat(ddsDesc.format);
         desc.flags = ddsDesc.type == ddspp::TextureType::Cubemap ? RenderTextureFlag::CUBE : RenderTextureFlag::NONE;
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-        if (IsBCFormat(desc.format))
-        {
-            const uint64_t textureHash = HashTextureData(data, dataSize);
+        BCDecodeInfo bcDecodeInfo{};
+        const bool decodeBC = g_decodeBCTextures && GetBCDecodeInfo(desc.format, bcDecodeInfo);
 
+        if (decodeBC)
+        {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+            if (HasBC7Overrides())
             {
+                const uint64_t textureHash = HashTextureData(data, dataSize);
+
                 std::vector<uint8_t> overrideData;
                 std::filesystem::path overridePath;
                 if (TryLoadBC7OverrideBytes(textureHash, overrideData, overridePath))
                 {
-                    os::logger::Log(fmt::format("LoadTexture iOS BC override found ({:016X}): {}", textureHash, overridePath.string()));
-                    if (LoadTexture(texture, overrideData.data(), overrideData.size(), componentMapping, forceCubeMap, {}))
+                    LOGFN("Loading BC texture override ({:016X}): {}", textureHash, overridePath.string());
+                    if (LoadTexture(texture, overrideData.data(), overrideData.size(), componentMapping, forceCubeMap, sourceName))
                         return true;
 
-                    os::logger::Log(fmt::format("LoadTexture iOS BC override failed to load ({:016X}), falling back to original: {}", textureHash, overridePath.string()));
+                    LOGFN_WARNING("Failed to load BC texture override ({:016X}), falling back to the original texture.", textureHash);
                 }
             }
+#endif
 
-            static uint64_t s_bcFallbackCount = 0;
-            s_bcFallbackCount++;
-
-            std::vector<uint8_t> decodedRGBA;
-            bool decoded = DecodeBCToRGBA8Mip0(data, ddsDesc, desc.format, decodedRGBA);
-
-            if (decoded)
+            // Decoding reads exactly this much, so make sure the file is not truncated.
+            size_t compressedSize = 0;
+            for (uint32_t mipSlice = 0; mipSlice < ddsDesc.numMips; mipSlice++)
             {
-                texture.textureHolder = g_device->createTexture(RenderTextureDesc::Texture2D(desc.width, desc.height, 1, RenderFormat::R8G8B8A8_UNORM));
-                texture.texture = texture.textureHolder.get();
-                texture.viewDimension = RenderTextureViewDimension::TEXTURE_2D;
-                texture.layout = RenderTextureLayout::COPY_DEST;
-
-                texture.descriptorIndex = g_textureDescriptorAllocator.allocate();
-                g_textureDescriptorSet->setTexture(texture.descriptorIndex, texture.texture, RenderTextureLayout::SHADER_READ);
-
-                uint32_t rowPitch = (desc.width * 4 + PITCH_ALIGNMENT - 1) & ~(PITCH_ALIGNMENT - 1);
-                uint32_t slicePitch = rowPitch * desc.height;
-
-                auto uploadBuffer = g_device->createBuffer(RenderBufferDesc::UploadBuffer(slicePitch));
-                uint8_t* mappedMemory = reinterpret_cast<uint8_t*>(uploadBuffer->map());
-
-                for (uint32_t y = 0; y < desc.height; y++)
-                {
-                    memcpy(mappedMemory + size_t(y) * rowPitch, decodedRGBA.data() + size_t(y) * desc.width * 4, size_t(desc.width) * 4);
-                }
-
-                uploadBuffer->unmap();
-
-                ExecuteCopyCommandList([&]
-                    {
-                        g_copyCommandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(texture.texture, RenderTextureLayout::COPY_DEST));
-                        g_copyCommandList->copyTextureRegion(
-                            RenderTextureCopyLocation::Subresource(texture.texture, 0, 0),
-                            RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), RenderFormat::R8G8B8A8_UNORM, desc.width, desc.height, 1, rowPitch / 4, 0));
-                    });
-
-                texture.width = desc.width;
-                texture.height = desc.height;
-
-                if (s_bcFallbackCount <= 16 || (s_bcFallbackCount % 64) == 0)
-                {
-                    os::logger::Log(fmt::format(
-                        "LoadTexture iOS BC decode - count: {}, format: {}, size: {}x{}, mips: {}, array: {}",
-                        s_bcFallbackCount,
-                        (int)desc.format,
-                        desc.width,
-                        desc.height,
-                        desc.mipLevels,
-                        desc.arraySize));
-                }
-
-                return true;
+                compressedSize += bc::GetCompressedSurfaceSize(bcDecodeInfo.format, std::max(1u, ddsDesc.width >> mipSlice), std::max(1u, ddsDesc.height >> mipSlice)) *
+                    std::max(1u, ddsDesc.depth >> mipSlice);
             }
 
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-            if (IsBC7Format(desc.format))
-                DumpBC7TextureForOfflineDecode(data, dataSize, ddsDesc);
-#endif
+            compressedSize *= arraySize;
 
-            os::logger::Log(fmt::format(
-                "LoadTexture iOS BC fallback (unsupported format) - count: {}, renderFormat: {}, dxgiFormat: {}, size: {}x{}, mips: {}, array: {}",
-                s_bcFallbackCount,
-                (int)desc.format,
-                int(ddsDesc.format),
-                desc.width,
-                desc.height,
-                desc.mipLevels,
-                desc.arraySize));
+            if (ddsDesc.headerSize > dataSize || compressedSize > dataSize - ddsDesc.headerSize)
+            {
+                LOGFN_ERROR("BC texture data is truncated ({} bytes, expected {}).", dataSize, ddsDesc.headerSize + compressedSize);
+                return false;
+            }
 
-            texture.textureHolder = g_device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, RenderFormat::R8G8B8A8_UNORM));
-            texture.texture = texture.textureHolder.get();
-            texture.viewDimension = RenderTextureViewDimension::TEXTURE_2D;
-            texture.layout = RenderTextureLayout::COPY_DEST;
-
-            texture.descriptorIndex = g_textureDescriptorAllocator.allocate();
-            g_textureDescriptorSet->setTexture(texture.descriptorIndex, texture.texture, RenderTextureLayout::SHADER_READ);
-
-            auto uploadBuffer = g_device->createBuffer(RenderBufferDesc::UploadBuffer(PITCH_ALIGNMENT));
-            uint8_t* mappedMemory = reinterpret_cast<uint8_t*>(uploadBuffer->map());
-            mappedMemory[0] = 0xFF;
-            mappedMemory[1] = 0xFF;
-            mappedMemory[2] = 0xFF;
-            mappedMemory[3] = 0xFF;
-            uploadBuffer->unmap();
-
-            ExecuteCopyCommandList([&]
-                {
-                    g_copyCommandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(texture.texture, RenderTextureLayout::COPY_DEST));
-                    g_copyCommandList->copyTextureRegion(
-                        RenderTextureCopyLocation::Subresource(texture.texture, 0, 0),
-                        RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), RenderFormat::R8G8B8A8_UNORM, 1, 1, 1, PITCH_ALIGNMENT / 4, 0));
-                });
-
-            texture.width = 1;
-            texture.height = 1;
-            return true;
+            desc.format = bcDecodeInfo.decodedFormat;
         }
-#endif
 
         if (forceCubeMap)
         {
@@ -6475,7 +6194,11 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
             uint32_t srcRowPitch;
             uint32_t dstRowPitch;
             uint32_t rowCount;
+            uint32_t dstRowCount;
         };
+
+        // Decoded BC textures are uploaded as uncompressed texels instead of blocks.
+        const uint32_t decodedTexelSize = decodeBC ? RenderFormatSize(desc.format) : 0;
 
         std::vector<Slice> slices;
         uint32_t curSrcOffset = 0;
@@ -6496,9 +6219,16 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
                 slice.srcRowPitch = (rowPitch + 7) / 8;
                 slice.dstRowPitch = (slice.srcRowPitch + PITCH_ALIGNMENT - 1) & ~(PITCH_ALIGNMENT - 1);
                 slice.rowCount = (slice.height + ddsDesc.blockHeight - 1) / ddsDesc.blockHeight;
+                slice.dstRowCount = slice.rowCount;
+
+                if (decodeBC)
+                {
+                    slice.dstRowPitch = (slice.width * decodedTexelSize + PITCH_ALIGNMENT - 1) & ~(PITCH_ALIGNMENT - 1);
+                    slice.dstRowCount = slice.height;
+                }
 
                 curSrcOffset += slice.srcRowPitch * slice.rowCount * slice.depth;
-                curDstOffset += (slice.dstRowPitch * slice.rowCount * slice.depth + PLACEMENT_ALIGNMENT - 1) & ~(PLACEMENT_ALIGNMENT - 1);
+                curDstOffset += (slice.dstRowPitch * slice.dstRowCount * slice.depth + PLACEMENT_ALIGNMENT - 1) & ~(PLACEMENT_ALIGNMENT - 1);
             }
         }
 
@@ -6510,7 +6240,16 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
             const uint8_t* srcData = data + ddsDesc.headerSize + slice.srcOffset;
             uint8_t* dstData = mappedMemory + slice.dstOffset;
 
-            if (slice.srcRowPitch == slice.dstRowPitch)
+            if (decodeBC)
+            {
+                for (uint32_t z = 0; z < slice.depth; z++)
+                {
+                    DecodeBCSurface(bcDecodeInfo, srcData, slice.width, slice.height, dstData, slice.dstRowPitch);
+                    srcData += slice.srcRowPitch * slice.rowCount;
+                    dstData += slice.dstRowPitch * slice.dstRowCount;
+                }
+            }
+            else if (slice.srcRowPitch == slice.dstRowPitch)
             {
                 memcpy(dstData, srcData, slice.srcRowPitch * slice.rowCount * slice.depth);
             }
@@ -6533,9 +6272,11 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
 
                 auto copyTextureRegion = [&](Slice& slice, uint32_t subresourceIndex)
                     {
+                        uint32_t rowWidth = decodeBC ? (slice.dstRowPitch / decodedTexelSize) : ((slice.dstRowPitch * 8) / ddsDesc.bitsPerPixelOrBlock * ddsDesc.blockWidth);
+
                         g_copyCommandList->copyTextureRegion(
                             RenderTextureCopyLocation::Subresource(texture.texture, subresourceIndex % ddsDesc.numMips, subresourceIndex / ddsDesc.numMips),
-                            RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), desc.format, slice.width, slice.height, slice.depth, (slice.dstRowPitch * 8) / ddsDesc.bitsPerPixelOrBlock * ddsDesc.blockWidth, slice.dstOffset));
+                            RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), desc.format, slice.width, slice.height, slice.depth, rowWidth, slice.dstOffset));
                     };
 
                 for (size_t i = 0; i < slices.size(); i++)
