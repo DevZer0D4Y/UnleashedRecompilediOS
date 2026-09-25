@@ -213,6 +213,35 @@ The installer may display this error for several reasons. Please check the follo
 
 Currently, there are no touch controls for iOS implemented outside of the installer. If you'd like them, please make a feature suggestion in my discord (if there's not one already and I can probably add some basic ones), but for now I have no plans on doing them.
 
+### How do I change the game's language?
+
+The game starts in English. You can switch the text and voices at any time, and your choice is saved.
+
+**From the game (requires a controller):**
+
+1) From the title screen or the pause menu, open **Options** → **System**.
+2) Change **Language** for the text and menus: English, Japanese, German, French, Spanish or Italian.
+3) Change **Voice Language** for the voice acting: English or Japanese.
+
+**From the Files app (no controller needed):**
+
+1) Launch the game once so it creates its settings file, then fully close it.
+2) Open **Files** → **On My iPhone** (or **On My iPad**) → **Unleashed** → **UnleashedRecomp** and open `config.toml`.
+3) Find the `[System]` section and change these lines, for example:
+
+    ```toml
+    [System]
+    Language = "Spanish"
+    VoiceLanguage = "Japanese"
+    ```
+
+    `Language` accepts `"English"`, `"Japanese"`, `"German"`, `"French"`, `"Spanish"` or `"Italian"`. `VoiceLanguage` accepts `"English"` or `"Japanese"`. Keep the quotes and the capital letter.
+
+4) Save the file and open the game again.
+
+> [!TIP]
+> Setting the language to Japanese also changes the title screen logo to the original Japanese *Sonic World Adventure* logo.
+
 ### I want to update the game. How can I avoid losing my save data? Do I need to reinstall the game?
 
 Updating the game can be done by simply installing the newer .ipa on top of your existing installation. **Your save data and configuration will not be lost.** You won't need to reinstall the game, as the game files will always remain the same across versions of UnleashedRecompiled for iOS.
