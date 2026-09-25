@@ -258,13 +258,9 @@ You can make the game ignore the [default configuration paths](#where-is-the-sav
 
 The Japanese version of Sonic Unleashed has some minor differences in both file structure and content that make this version of the game incompatible with the international release. Furthermore, the US and EU versions of the game already support Japanese. Supporting this version would only cause mod compatibility issues in the future, so it is unlikely to be added to the update roadmap as it would also require its own recompilation.
 
-### Will macOS be supported?
-
-macOS is officially supported in this fork.
-
 ### What other platforms will be supported?
 
-This project does not plan to support any more platforms other than iOS and macOS at the moment. Any contributors who wish to support more platforms should do so through my discord.
+This project does not plan to support any more platforms other than iOS. Any contributors who wish to support more platforms should do so through my discord.
 
 ### Do you have plans to recompile other Xbox 360 games or Sonic games?
 
