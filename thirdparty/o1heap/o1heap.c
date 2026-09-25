@@ -381,8 +381,10 @@ void* o1heapAllocate(O1HeapInstance* const handle, const size_t amount)
     return out;
 }
 
-void o1heapFree(O1HeapInstance* const handle, void* const pointer)
+/// Returns the free fragment the pointer ended up in, or NULL if the pointer is NULL.
+O1HEAP_PRIVATE Fragment* freeFragment(O1HeapInstance* const handle, void* const pointer)
 {
+    Fragment* out = NULL;
     O1HEAP_ASSERT(handle != NULL);
     O1HEAP_ASSERT(handle->diagnostics.capacity <= FRAGMENT_SIZE_MAX);
     if (O1HEAP_LIKELY(pointer != NULL))  // NULL pointer is a no-op.
@@ -423,6 +425,7 @@ void o1heapFree(O1HeapInstance* const handle, void* const pointer)
             O1HEAP_ASSERT((prev->header.size % FRAGMENT_SIZE_MIN) == 0U);
             interlink(prev, next->header.next);
             rebin(handle, prev);
+            out = prev;
         }
         else if (join_left)  // [ prev ][ this ][ next ] => [ --- prev --- ][ next ]
         {
@@ -432,6 +435,7 @@ void o1heapFree(O1HeapInstance* const handle, void* const pointer)
             O1HEAP_ASSERT((prev->header.size % FRAGMENT_SIZE_MIN) == 0U);
             interlink(prev, next);
             rebin(handle, prev);
+            out = prev;
         }
         else if (join_right)  // [ prev ][ this ][ next ] => [ prev ][ --- this --- ]
         {
@@ -441,11 +445,39 @@ void o1heapFree(O1HeapInstance* const handle, void* const pointer)
             O1HEAP_ASSERT((frag->header.size % FRAGMENT_SIZE_MIN) == 0U);
             interlink(frag, next->header.next);
             rebin(handle, frag);
+            out = frag;
         }
         else
         {
             rebin(handle, frag);
+            out = frag;
         }
+    }
+    return out;
+}
+
+void o1heapFree(O1HeapInstance* const handle, void* const pointer)
+{
+    (void) freeFragment(handle, pointer);
+}
+
+void o1heapFreeAndGetUnusedRange(O1HeapInstance* const handle,
+                                 void* const           pointer,
+                                 void** const          out_unused_begin,
+                                 void** const          out_unused_end)
+{
+    O1HEAP_ASSERT((out_unused_begin != NULL) && (out_unused_end != NULL));
+    Fragment* const frag = freeFragment(handle, pointer);
+    if (frag != NULL)
+    {
+        // The header and the free list links are the only parts of a free fragment used by the allocator.
+        *out_unused_begin = ((char*) frag) + sizeof(Fragment);
+        *out_unused_end   = ((char*) frag) + frag->header.size;
+    }
+    else
+    {
+        *out_unused_begin = NULL;
+        *out_unused_end   = NULL;
     }
 }
 

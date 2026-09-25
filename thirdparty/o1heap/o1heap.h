@@ -104,6 +104,15 @@ extern "C" {
     /// The function is executed in constant time.
     void o1heapFree(O1HeapInstance* const handle, void* const pointer);
 
+    /// Same as o1heapFree(), but also outputs the address range of the resulting free fragment (after merging with its
+    /// free neighbors) that the allocator does not use for its own bookkeeping. The contents of that range can be
+    /// discarded, e.g. by returning its pages to the operating system, as long as the heap is not modified meanwhile.
+    /// Both outputs are NULL if the pointer is NULL.
+    void o1heapFreeAndGetUnusedRange(O1HeapInstance* const handle,
+                                     void* const           pointer,
+                                     void** const          out_unused_begin,
+                                     void** const          out_unused_end);
+
     /// Performs a basic sanity check on the heap.
     /// This function can be used as a weak but fast method of heap corruption detection.
     /// If the handle pointer is NULL, the behavior is undefined.

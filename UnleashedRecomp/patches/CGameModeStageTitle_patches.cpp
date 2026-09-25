@@ -12,9 +12,12 @@ PPC_FUNC(sub_825518B8)
 
     __imp__sub_825518B8(ctx, base);
 
+    // Free the pipelines of the previous gameplay session to reduce memory usage on iOS.
     bool isAdvertiseMovie = pGameModeStageTitle->m_IsPlayingAdvertiseMovie;
+#ifdef UNLEASHED_RECOMP_IOS
     if (isAdvertiseMovie && !s_lastWasAdvertiseMovie)
         Video::QueueTrimRuntimeCaches();
+#endif
 
     s_lastWasAdvertiseMovie = isAdvertiseMovie;
 
