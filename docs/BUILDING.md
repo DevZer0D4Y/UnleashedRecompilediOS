@@ -149,7 +149,7 @@ cmake . --preset ios-xcode-debug \
 
 2. Open the generated Xcode project.
 ```bash
-open ./out/build/ios-xcode-debug/UnleashedRecomp.xcodeproj
+open ./out/build/ios-xcode-debug/UnleashedRecomp-ALL.xcodeproj
 ```
 
 3. In Xcode, select your iPhone/iPad as the run destination and run the `UnleashedRecomp` target.
