@@ -32,7 +32,6 @@ YouTube: https://www.youtube.com/@develop_erZ
 
 - Device:
   - iPhone or iPad with a 64-bit Apple chip and Metal support.
-  - Tested on A16 Bionic (iPhone 14 Pro) at 61% resolution scale, running at 30-60 FPS. Older chips may work at lower resolution scales, but are untested.
 - Memory:
   - 4 GB of RAM minimum.
   - 6 GB recommended (e.g. iPhone 13 Pro, iPhone 14 or newer), as 4 GB devices are more likely to be closed by iOS when memory runs low.
