@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The game reserves 4 GB of address space for the Xbox 360's memory at launch. -->
+    <key>com.apple.developer.kernel.extended-virtual-addressing</key>
+    <true/>
+    <!-- Lets devices with less RAM give the game more memory before iOS closes it. -->
+    <key>com.apple.developer.kernel.increased-memory-limit</key>
+    <true/>
+</dict>
+</plist>

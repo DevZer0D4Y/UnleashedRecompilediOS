@@ -11,6 +11,7 @@ set(UNLEASHED_RECOMP_IOS_CODE_SIGN_IDENTITY "Apple Development" CACHE STRING "Co
 set(UNLEASHED_RECOMP_IOS_CODE_SIGN_STYLE "Automatic" CACHE STRING "iOS code sign style (Automatic or Manual)")
 set(UNLEASHED_RECOMP_IOS_PROVISIONING_PROFILE_SPECIFIER "" CACHE STRING "Provisioning profile specifier for iOS signing")
 option(UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING "Enable code signing for iOS builds" ON)
+option(UNLEASHED_RECOMP_IOS_EXTENDED_MEMORY "Request the Extended Virtual Addressing and Increased Memory Limit entitlements on iOS" ON)
 option(UNLEASHED_RECOMP_IOS_LOW_MEM_INSTALLER "Load fewer installer textures on iOS to reduce memory usage" ON)
 
 if (UNLEASHED_RECOMP_IOS AND NOT UNLEASHED_RECOMP_IOS_DEVELOPMENT_TEAM)
@@ -422,6 +423,12 @@ elseif (UNLEASHED_RECOMP_IOS)
         XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
         XCODE_ATTRIBUTE_ENABLE_BITCODE "NO"
     )
+
+    if (UNLEASHED_RECOMP_IOS_EXTENDED_MEMORY)
+        list(APPEND UNLEASHED_RECOMP_IOS_XCODE_PROPS
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS ${CMAKE_CURRENT_SOURCE_DIR}/res/ios/UnleashedRecomp.entitlements
+        )
+    endif()
 
     if (NOT UNLEASHED_RECOMP_IOS_ENABLE_CODE_SIGNING)
         list(APPEND UNLEASHED_RECOMP_IOS_XCODE_PROPS

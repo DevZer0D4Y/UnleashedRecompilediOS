@@ -825,6 +825,7 @@ static void DestructTempResources()
 
 static std::thread::id g_presentThreadId = std::this_thread::get_id();
 static std::atomic<bool> g_readyForCommands;
+static std::atomic<bool> g_appSuspended;
 
 PPC_FUNC_IMPL(__imp__sub_824ECA00);
 PPC_FUNC(sub_824ECA00)
@@ -1782,6 +1783,10 @@ static void BeginCommandList()
     commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 1);
     commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 2);
     commandList->setGraphicsDescriptorSet(g_samplerDescriptorSet.get(), 3);
+
+    // iOS doesn't allow GPU work while the app is in the background, so hold here until it's back.
+    if (g_appSuspended.load(std::memory_order_relaxed))
+        g_appSuspended.wait(true, std::memory_order_acquire);
 
     g_readyForCommands = true;
     g_readyForCommands.notify_one();
@@ -3045,6 +3050,27 @@ static void ProcDrawImGui(const RenderCommand& cmd)
 // 4. Loading thread presents and quits.
 // 5. After the loading thread quits, application also presents.
 static bool g_pendingWaitOnSwapChain = true;
+
+void Video::HandleApplicationBackgroundState(bool isBackgrounded)
+{
+    if (isBackgrounded)
+    {
+        g_appSuspended.store(true, std::memory_order_release);
+        g_readyForCommands.store(false, std::memory_order_release);
+        g_pendingWaitOnSwapChain = false;
+        g_swapChainValid = false;
+        g_dirtyStates.viewport = true;
+
+        // Let work already submitted finish before iOS suspends the app.
+        if (g_queue != nullptr && g_waitForGPUCommandList != nullptr)
+            Video::WaitForGPU();
+    }
+    else
+    {
+        g_appSuspended.store(false, std::memory_order_release);
+        g_appSuspended.notify_all();
+    }
+}
 
 void Video::WaitOnSwapChain()
 {

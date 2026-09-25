@@ -48,6 +48,14 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
 
     switch (event->type)
     {
+        case SDL_APP_WILLENTERBACKGROUND:
+            Video::HandleApplicationBackgroundState(true);
+            break;
+
+        case SDL_APP_DIDENTERFOREGROUND:
+            Video::HandleApplicationBackgroundState(false);
+            break;
+
         case SDL_QUIT:
         {
             if (App::s_isSaving)
