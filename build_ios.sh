@@ -205,7 +205,7 @@ cmake --preset "$IOS_PRESET" \
 archive_app() {
     rm -rf "$ARCHIVE"
     xcodebuild \
-        -project "$IOS_BUILD/UnleashedRecomp.xcodeproj" \
+        -project "$IOS_BUILD/UnleashedRecomp-ALL.xcodeproj" \
         -scheme UnleashedRecomp \
         -configuration Release \
         -destination "generic/platform=iOS" \
