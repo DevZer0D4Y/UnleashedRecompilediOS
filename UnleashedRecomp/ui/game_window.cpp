@@ -4,7 +4,6 @@
 #include <os/user.h>
 #include <os/version.h>
 #include <app.h>
-#include <plume_apple.h>
 #include <sdl_listener.h>
 #include <SDL_syswm.h>
 #if defined(__APPLE__)
@@ -13,6 +12,10 @@
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
+#endif
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#include <plume_apple.h>
 #endif
 
 #if _WIN32
@@ -332,11 +335,14 @@ void GameWindow::Init(const char* sdlVideoDriver)
         metalLayerFailures,
         SDL_GetError());
 
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    // Fall back to letting plume create the Metal layer if SDL couldn't provide one.
     if (s_renderWindow.view == nullptr)
         s_renderWindow.view = plume::ensureMetalLayerForIOSWindow(s_renderWindow.window);
 
     if (s_renderWindow.view == nullptr)
         s_renderWindow.view = plume::ensureMetalLayerForIOSWindow(nullptr);
+#endif
 
     if (s_renderWindow.view != nullptr)
         os::logger::Log("GameWindow::Init - metal layer ready");
