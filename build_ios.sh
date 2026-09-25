@@ -46,7 +46,7 @@ step "Unpacking Xbox 360 packages in $GAME_DIR"
 # Title updates, DLC and Games on Demand copies often come as raw STFS packages (files starting with CON, LIVE or PIRS)
 # rather than folders. Unpack them into a phone-ready folder: out/game_files/{game,update,dlc}.
 ninja -C "$MAC_BUILD" x_content_extract
-EXTRACTOR="$(find "$MAC_BUILD" -type f -name x_content_extract -perm -u+x | head -n 1)"
+EXTRACTOR="$(find "$MAC_BUILD" -type f -name x_content_extract -perm -u+x | head -n 1 || true)"
 [[ -n "$EXTRACTOR" ]] || fail "The package extractor didn't build."
 
 GAME_FILES="$REPO/out/game_files"
@@ -72,26 +72,42 @@ while IFS= read -r -d '' file; do
         continue
     fi
 
-    if [[ -f "$unpacked/default.xexp" ]]; then
+    # Packages can keep their files in a subfolder, so look for each marker file anywhere inside.
+    find_marker() {
+        find "$unpacked" -type f -iname "$1" 2>/dev/null | awk '{ print length, $0 }' | sort -n | head -n 1 | cut -d' ' -f2- || true
+    }
+
+    marker="$(find_marker default.xexp)"
+    if [[ -n "$marker" ]]; then
         rm -rf "$GAME_FILES/update"
-        mv "$unpacked" "$GAME_FILES/update"
+        mv "$(dirname "$marker")" "$GAME_FILES/update"
         echo "  Title update: $(basename "$file")"
-    elif [[ -f "$unpacked/DLC.xml" ]]; then
-        mkdir -p "$GAME_FILES/dlc"
-        mv "$unpacked" "$GAME_FILES/dlc/$(basename "$file")"
-        echo "  DLC:          $(basename "$file")"
-    elif [[ -f "$unpacked/default.xex" ]]; then
-        rm -rf "$GAME_FILES/game"
-        mv "$unpacked" "$GAME_FILES/game"
-        echo "  Base game:    $(basename "$file")"
-    else
-        echo "  Skipped $(basename "$file"): not the game, its update or DLC"
+        continue
     fi
+
+    marker="$(find_marker DLC.xml)"
+    if [[ -n "$marker" ]]; then
+        mkdir -p "$GAME_FILES/dlc"
+        mv "$(dirname "$marker")" "$GAME_FILES/dlc/$(basename "$file")"
+        echo "  DLC:          $(basename "$file")"
+        continue
+    fi
+
+    marker="$(find_marker default.xex)"
+    if [[ -n "$marker" ]]; then
+        rm -rf "$GAME_FILES/game"
+        mv "$(dirname "$marker")" "$GAME_FILES/game"
+        echo "  Base game:    $(basename "$file")"
+        continue
+    fi
+
+    echo "  Skipped $(basename "$file"): not the game, its update or DLC. It contains $(find "$unpacked" -type f | wc -l | tr -d ' ') files:"
+    (cd "$unpacked" && find . -type f | head -n 15 | sed 's|^\./|      |') || true
 done < <(find "$GAME_DIR" -type f -size +100k -print0 2>/dev/null)
 
 # A disc image of the base game.
-if ! find "$GAME_DIR" -type f -iname default.xex ! -path "*/patched/*" 2>/dev/null | grep -q . && [[ ! -d "$GAME_FILES/game" ]]; then
-    ISO="$(find "$GAME_DIR" -type f -iname "*.iso" 2>/dev/null | head -n 1)"
+if [[ -z "$(find "$GAME_DIR" -type f -iname default.xex ! -path "*/patched/*" -print -quit 2>/dev/null)" && ! -d "$GAME_FILES/game" ]]; then
+    ISO="$(find "$GAME_DIR" -type f -iname "*.iso" 2>/dev/null | head -n 1 || true)"
     if [[ -n "$ISO" ]]; then
         "$EXTRACTOR" --iso "$ISO" --iso-extract-all "$GAME_FILES/game" >/dev/null || fail "Couldn't unpack $ISO."
         echo "  Base game:    $(basename "$ISO")"
@@ -103,7 +119,7 @@ rm -rf "$UNPACK_TMP"
 step "Finding the game files"
 # Skip files this project generates, so a folder that was already set up by the game still works.
 find_file() {
-    find "$GAME_FILES" "$GAME_DIR" -type f -iname "$1" ! -path "*/patched/*" ! -iname "*_patched*" 2>/dev/null | head -n 1
+    find "$GAME_FILES" "$GAME_DIR" -type f -iname "$1" ! -path "*/patched/*" ! -iname "*_patched*" 2>/dev/null | head -n 1 || true
 }
 
 XEX="$(find_file default.xex)"
@@ -153,7 +169,7 @@ ninja -C "$MAC_BUILD" "${GENERATED[@]}"
 # The macOS pass compiles the Metal shaders for macOS, which an iPhone can't load. Recompile them for iOS
 # and embed those instead, as the iOS build reuses whatever embedded shaders already exist.
 step "Compiling the Metal shaders for iOS"
-FILE_TO_C="$(find "$MAC_BUILD" -type f -name file_to_c -perm -u+x | head -n 1)"
+FILE_TO_C="$(find "$MAC_BUILD" -type f -name file_to_c -perm -u+x | head -n 1 || true)"
 [[ -n "$FILE_TO_C" ]] || fail "file_to_c wasn't built by the macOS pass."
 
 for embedded in "$REPO"/UnleashedRecomp/gpu/shader/msl/*.metallib.c; do
@@ -230,7 +246,7 @@ xcodebuild -exportArchive \
     -exportOptionsPlist "$EXPORT_OPTIONS" \
     -allowProvisioningUpdates
 
-IPA="$(find "$IPA_DIR" -name "*.ipa" | head -n 1)"
+IPA="$(find "$IPA_DIR" -name "*.ipa" | head -n 1 || true)"
 [[ -n "$IPA" ]] || fail "The IPA wasn't exported. Check the messages above."
 
 step "Done"
