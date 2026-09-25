@@ -116,6 +116,13 @@ cmake --build ./out/build/macos-release --target UnleashedRecomp
 open -a UnleashedRecomp.app
 ```
 
+### iOS in one command (recommended)
+On a Mac with Xcode and your Apple ID added in Xcode > Settings > Accounts, run:
+```bash
+./build_ios.sh "/path/to/your game files"
+```
+The script finds `default.xex`, `default.xexp` and `shader.ar` anywhere inside that folder and copies them into `./UnleashedRecompLib/private/`. It then generates the recompiled code and shaders with a macOS build, compiles the Metal shaders for iOS, and builds, signs and exports the IPA to `./out/ipa/`. It detects your development team from your signing certificate. Set `TEAM_ID`, `BUNDLE_ID` or `EXTENDED_MEMORY=OFF` in the environment to override the defaults.
+
 ### iOS (experimental)
 1. Configure the project with the iOS preset.
 ```bash
