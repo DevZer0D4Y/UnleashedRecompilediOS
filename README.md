@@ -253,7 +253,7 @@ After Minecraft Xbox 360 Edition for iOS and Sonic Unleashed for iOS, maybe a To
 
 - [Goalringmod27](https://linktr.ee/goalringmod27): Concept Artist behind the achievements overlay shown during gameplay. Aided in the creation of the Transparency Anti-Aliasing thumbnail.
 
-- [M&M](https://github.com/ActualMandM): Provisional support for dynamic UI aspect ratio.
+- [RagdollClash](https://github.com/RagdollClash): Provisional support for dynamic UI aspect ratio.
 
 - [DaGuAr](https://twitter.com/TheDaguar): Provided Spanish localization for the custom menus alongside Darío.
 
