@@ -11,6 +11,7 @@
 #include <kernel/io/file_system.h>
 #include <file.h>
 #include <xex.h>
+#include <app.h>
 #include <apu/audio.h>
 #include <hid/hid.h>
 #include <user/config.h>
@@ -218,18 +219,27 @@ int main(int argc, char *argv[])
     bool graphicsApiRetry = false;
     const char *sdlVideoDriver = nullptr;
 
-    for (uint32_t i = 1; i < argc; i++)
-    {
-        forceInstaller = forceInstaller || (strcmp(argv[i], "--install") == 0);
-        forceDLCInstaller = forceDLCInstaller || (strcmp(argv[i], "--install-dlc") == 0);
-        useDefaultWorkingDirectory = useDefaultWorkingDirectory || (strcmp(argv[i], "--use-cwd") == 0);
-        forceInstallationCheck = forceInstallationCheck || (strcmp(argv[i], "--install-check") == 0);
-        graphicsApiRetry = graphicsApiRetry || (strcmp(argv[i], "--graphics-api-retry") == 0);
+    std::vector<std::string> args(argv + 1, argv + argc);
 
-        if (strcmp(argv[i], "--sdl-video-driver") == 0)
+    // Arguments of a restart the app could not perform by itself (e.g. on iOS).
+    for (auto& arg : App::ConsumePendingLaunchArguments())
+    {
+        LOGFN("Applying launch argument from the previous session: {}", arg);
+        args.push_back(arg);
+    }
+
+    for (size_t i = 0; i < args.size(); i++)
+    {
+        forceInstaller = forceInstaller || (args[i] == "--install");
+        forceDLCInstaller = forceDLCInstaller || (args[i] == "--install-dlc");
+        useDefaultWorkingDirectory = useDefaultWorkingDirectory || (args[i] == "--use-cwd");
+        forceInstallationCheck = forceInstallationCheck || (args[i] == "--install-check");
+        graphicsApiRetry = graphicsApiRetry || (args[i] == "--graphics-api-retry");
+
+        if (args[i] == "--sdl-video-driver")
         {
-            if ((i + 1) < argc)
-                sdlVideoDriver = argv[++i];
+            if ((i + 1) < args.size())
+                sdlVideoDriver = args[++i].c_str();
             else
                 LOGN_WARNING("No argument was specified for --sdl-video-driver. Option will be ignored.");
         }

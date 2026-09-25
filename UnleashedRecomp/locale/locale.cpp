@@ -704,6 +704,18 @@ std::unordered_map<std::string_view, std::unordered_map<ELanguage, std::string>>
         }
     },
     {
+        // Notes: shown on iOS instead of restarting, as iOS apps cannot relaunch themselves.
+        "System_iOS_ReopenRequired",
+        {
+            { ELanguage::English,  "iOS does not allow the game to restart by itself.\n\nPlease open the game again to continue." },
+            { ELanguage::Japanese, "iOSではゲームを自動的に再起動できません\n\nもう一度ゲームを起動して続行してください" },
+            { ELanguage::German,   "iOS erlaubt dem Spiel keinen automatischen Neustart.\n\nBitte öffne das Spiel erneut, um fortzufahren." },
+            { ELanguage::French,   "iOS ne permet pas au jeu de redémarrer automatiquement.\n\nVeuillez rouvrir le jeu pour continuer." },
+            { ELanguage::Spanish,  "iOS no permite que el juego se reinicie automáticamente.\n\nPor favor, vuelve a abrir el juego para continuar." },
+            { ELanguage::Italian,  "iOS non permette al gioco di riavviarsi automaticamente.\n\nRiapri il gioco per continuare." }
+        }
+    },
+    {
         "System_MemoryAllocationFailed",
         {
             { ELanguage::English,  "Failed to allocate game memory.\n\nPlease make sure that:\n\n- You meet the minimum system requirements (8 GB).\n- Your page file is configured with at least 4-8 GB of virtual memory." },

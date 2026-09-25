@@ -19,5 +19,8 @@ public:
 
     static void Restart(std::vector<std::string> restartArgs = {});
     static void Exit();
+
+    // Returns the arguments of a restart that could not relaunch the app by itself (e.g. on iOS) and clears them.
+    static std::vector<std::string> ConsumePendingLaunchArguments();
 };
 
