@@ -84,6 +84,10 @@ struct Installer
     static bool install(const Sources &sources, const std::filesystem::path &targetDirectory, bool skipHashChecks, Journal &journal, std::chrono::seconds endWaitTime, const std::function<bool()> &progressCallback);
     static void rollback(Journal &journal);
 
+    // Finishes an install whose game/update (and optional DLC) folders were copied into baseDirectory by hand,
+    // e.g. through the Files app on iOS. Normalizes DLC folder names and creates the patched executable.
+    static bool setupCopiedFiles(const std::filesystem::path &baseDirectory, Journal &journal);
+
     // Convenience method for checking if the specified file contains the game. This should be used when the user selects the file.
     static bool parseGame(const std::filesystem::path &sourcePath);
 

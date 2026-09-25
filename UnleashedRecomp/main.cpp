@@ -30,6 +30,10 @@
 #include <preload_executable.h>
 #include <SDL.h>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #ifdef _WIN32
 #include <timeapi.h>
 #endif
@@ -351,6 +355,70 @@ int main(int argc, char *argv[])
 
     std::filesystem::path modulePath;
     bool isGameInstalled = Installer::checkGameInstall(gameRoot, modulePath);
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    constexpr bool isMobileSetup = true;
+#else
+    constexpr bool isMobileSetup = false;
+#endif
+
+    if (isMobileSetup)
+    {
+        // Create the folders players copy their game files into, so they show up in the Files app.
+        std::error_code ec;
+        std::filesystem::create_directories(gameRoot / "game", ec);
+        std::filesystem::create_directories(gameRoot / "update", ec);
+        std::filesystem::create_directories(gameRoot / "dlc", ec);
+    }
+
+    // The game and update folders were copied in by hand (e.g. through the Files app): finish the setup without the installer.
+    if (!isGameInstalled && !forceInstaller && hasGameExecutable && hasUpdatePatch)
+    {
+        LOGN("Found copied game files, creating patched executable.");
+
+        Journal journal;
+        if (Installer::setupCopiedFiles(gameRoot, journal))
+        {
+            isGameInstalled = Installer::checkGameInstall(gameRoot, modulePath);
+        }
+        else
+        {
+            LOGFN_ERROR("Setup from copied game files failed: {}", journal.lastErrorMessage);
+
+            if (isMobileSetup)
+            {
+                std::string message = "The game files in the UnleashedRecomp folder could not be set up.\n\n" + journal.lastErrorMessage +
+                    "\n\nCopy the full contents of your game into the \"game\" folder and the title update into the \"update\" folder, then open the app again.";
+
+                SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), message.c_str(), GameWindow::s_pWindow);
+                std::_Exit(1);
+            }
+        }
+    }
+
+    if (isMobileSetup && !isGameInstalled && !forceInstaller)
+    {
+        const SDL_MessageBoxButtonData buttons[] =
+        {
+            { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Close" },
+            { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Open Installer" }
+        };
+
+        SDL_MessageBoxData messageBox{};
+        messageBox.flags = SDL_MESSAGEBOX_INFORMATION;
+        messageBox.window = GameWindow::s_pWindow;
+        messageBox.title = GameWindow::GetTitle();
+        messageBox.message =
+            "Game files not found.\n\n"
+            "Open the Files app and go to On My iPhone > Unleashed > UnleashedRecomp. Copy your game files into the \"game\" folder, "
+            "the title update files into the \"update\" folder and any DLC folders into the \"dlc\" folder, then open the app again.";
+        messageBox.numbuttons = SDL_arraysize(buttons);
+        messageBox.buttons = buttons;
+
+        int buttonId = 0;
+        if (SDL_ShowMessageBox(&messageBox, &buttonId) != 0 || buttonId != 1)
+            std::_Exit(0);
+    }
     bool runInstallerWizard = forceInstaller || forceDLCInstaller || !isGameInstalled;
     LOGFN("Install state - gameInstalled: {}, runInstallerWizard: {}, candidateModulePath: {}", isGameInstalled, runInstallerWizard, (const char*)modulePath.u8string().c_str());
     if (runInstallerWizard)

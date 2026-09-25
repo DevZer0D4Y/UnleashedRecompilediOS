@@ -77,6 +77,25 @@ A16 Bionic (iPhone 14 Pro) for 61% resolution scale @ 30-60FPS
 
     - **Add Folder** will only allow you to provide a **directory with the game's raw files** corresponding to the piece of content that is requested. **It will NOT scan your folder for compatible content!**
 
+### Installing on iPhone/iPad without a PC
+
+1) Install the `.ipa` from [the latest release](https://github.com/DevZer0D4Y/UnleashedRecompilediOS/releases/latest) with your sideloading tool of choice and open the app once. It will tell you that no game files were found and create its folders.
+
+2) Open the **Files** app and go to **On My iPhone** (or **On My iPad**) → **Unleashed** → **UnleashedRecomp**. This is the same folder that holds the settings and `.toml` files.
+
+3) Copy your extracted game files into it so it looks like this:
+
+    ```
+    UnleashedRecomp/
+    ├── game/      <- the base game's files (default.xex, ...)
+    ├── update/    <- the title update's files (default.xexp, ...)
+    └── dlc/       <- optional, one folder per DLC (each containing DLC.xml)
+    ```
+
+    DLC folders can have any name, they'll be renamed to what the game expects automatically.
+
+4) Open the app again. It will check the files, create the patched executable and start the game, no installer needed.
+
 > [!NOTE]
 > Please note that it is **not possible** to complete the installation if your files have been **modified**. In case of other problems such as black screens or crashes, **do not try to reinstall the game** as it is not possible for the process to result in an invalid installation.
 
