@@ -23,6 +23,8 @@ YouTube: https://www.youtube.com/@develop_erZ
 
 - [Minimum System Requirements](#minimum-system-requirements)
 - [How to Install](#how-to-install)
+    - [Installing on iPhone/iPad without a PC](#installing-on-iphoneipad-without-a-pc)
+- [How do I change the game's language?](#how-do-i-change-the-games-language)
 - [Features](#features)
 - [Credits](#credits)
 
