@@ -16,6 +16,7 @@
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 #include <plume_apple.h>
+#include "ios_scene.h"
 #endif
 
 #if _WIN32
@@ -291,6 +292,9 @@ void GameWindow::Init(const char* sdlVideoDriver)
     }
 
     LOGFN("GameWindow::Init - iOS UIWindow from WMInfo: {} (wmInfoFailures={})", s_renderWindow.window ? "yes" : "no", wmInfoFailures);
+
+    // The window only becomes visible once it's attached to the app's scene.
+    ios_scene::AttachWindow(s_renderWindow.window);
 #endif
 
     void* metalLayer = nullptr;

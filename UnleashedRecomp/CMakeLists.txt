@@ -206,6 +206,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
 
 if (UNLEASHED_RECOMP_IOS)
     list(APPEND UNLEASHED_RECOMP_UI_CXX_SOURCES "ui/ios_file_picker.mm")
+    list(APPEND UNLEASHED_RECOMP_UI_CXX_SOURCES "ui/ios_scene.mm")
     list(APPEND UNLEASHED_RECOMP_UI_CXX_SOURCES "ui/touch_haptics_ios.mm")
 endif()
 
