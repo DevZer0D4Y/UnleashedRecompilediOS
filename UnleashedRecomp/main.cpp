@@ -34,6 +34,10 @@
 #include <TargetConditionals.h>
 #endif
 
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#include <ui/ios_scene.h>
+#endif
+
 #ifdef _WIN32
 #include <timeapi.h>
 #endif
@@ -212,6 +216,11 @@ int main(int argc, char *argv[])
         LOGN_WARNING("OS does not support registry.");
 
     os::logger::Init();
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    // Nothing can be shown on screen until iOS has connected the app's scene.
+    ios_scene::WaitForScene();
+#endif
 
     PreloadContext preloadContext;
     preloadContext.PreloadExecutable();
