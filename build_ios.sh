@@ -101,6 +101,11 @@ while IFS= read -r -d '' file; do
         continue
     fi
 
+    if [[ -n "$(find_marker xboxupd.bin)" ]]; then
+        echo "  Skipped $(basename "$file"): this is an Xbox 360 system update from the game disc, not the game's title update."
+        continue
+    fi
+
     echo "  Skipped $(basename "$file"): not the game, its update or DLC. It contains $(find "$unpacked" -type f | wc -l | tr -d ' ') files:"
     (cd "$unpacked" && find . -type f | head -n 15 | sed 's|^\./|      |') || true
 done < <(find "$GAME_DIR" -type f -size +100k -print0 2>/dev/null)
@@ -125,7 +130,7 @@ find_file() {
 XEX="$(find_file default.xex)"
 XEXP="$(find_file default.xexp)"
 [[ -n "$XEX" ]] || fail "default.xex not found. It's in the base game's main folder, or inside its disc image or package."
-[[ -n "$XEXP" ]] || fail "default.xexp not found. It comes from the title update. Put the extracted update folder or the update package file in $GAME_DIR."
+[[ -n "$XEXP" ]] || fail "default.xexp not found. It comes from the game's title update, which isn't on the disc: download it on your Xbox 360, then copy it from Content/0000000000000000/534507D4/000B0000/ on the console's drive into $GAME_DIR (see docs/DUMPING-en.md)."
 
 # shader.ar sits next to the base game's default.xex.
 SHADER="$(dirname "$XEX")/shader.ar"
