@@ -3,6 +3,8 @@
 #include <gpu/video.h>
 #include <install/installer.h>
 #include <kernel/function.h>
+#include <locale/locale.h>
+#include <os/logger.h>
 #include <os/process.h>
 #include <patches/audio_patches.h>
 #include <patches/inspire_patches.h>
@@ -11,10 +13,54 @@
 #include <user/paths.h>
 #include <user/registry.h>
 
+static std::filesystem::path GetPendingLaunchArgumentsPath()
+{
+    return GetUserPath() / "pending_launch_arguments.txt";
+}
+
 void App::Restart(std::vector<std::string> restartArgs)
 {
+#ifdef UNLEASHED_RECOMP_IOS
+    // iOS apps cannot launch a new instance of themselves. Save the arguments so the
+    // next launch picks them up (e.g. to open the DLC installer) and let the user reopen the app.
+    {
+        std::ofstream file(GetPendingLaunchArgumentsPath(), std::ios::trunc);
+        for (auto& arg : restartArgs)
+            file << arg << '\n';
+
+        if (!file)
+            LOGN_ERROR("Failed to save the arguments for the next launch.");
+    }
+
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, GameWindow::GetTitle(), Localise("System_iOS_ReopenRequired").c_str(), GameWindow::s_pWindow);
+#else
     os::process::StartProcess(os::process::GetExecutablePath(), restartArgs, os::process::GetWorkingDirectory());
+#endif
+
     Exit();
+}
+
+std::vector<std::string> App::ConsumePendingLaunchArguments()
+{
+    std::vector<std::string> args;
+    std::filesystem::path path = GetPendingLaunchArgumentsPath();
+
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec))
+        return args;
+
+    {
+        std::ifstream file(path);
+        std::string line;
+        while (std::getline(file, line))
+        {
+            if (!line.empty())
+                args.push_back(line);
+        }
+    }
+
+    std::filesystem::remove(path, ec);
+    return args;
 }
 
 void App::Exit()
