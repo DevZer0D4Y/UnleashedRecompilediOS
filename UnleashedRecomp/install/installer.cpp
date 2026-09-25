@@ -663,6 +663,69 @@ bool Installer::install(const Sources &sources, const std::filesystem::path &tar
     return true;
 }
 
+bool Installer::setupCopiedFiles(const std::filesystem::path &baseDirectory, Journal &journal)
+{
+    std::error_code ec;
+
+    // DLC folders copied by hand may have any name. Rename the ones we recognize to the name the game expects.
+    std::vector<std::filesystem::path> dlcFolders;
+    for (const auto &entry : std::filesystem::directory_iterator(baseDirectory / DLCDirectory, ec))
+    {
+        if (entry.is_directory(ec))
+            dlcFolders.push_back(entry.path());
+    }
+
+    for (const auto &dlcFolder : dlcFolders)
+    {
+        DLCSource dlcSource;
+        if (!fillDLCSource(parseDLC(dlcFolder), dlcSource))
+            continue;
+
+        std::filesystem::path expectedPath = baseDirectory / dlcSource.targetSubDirectory;
+        if (dlcFolder == expectedPath || std::filesystem::exists(expectedPath, ec))
+            continue;
+
+        std::filesystem::rename(dlcFolder, expectedPath, ec);
+    }
+
+    // Make sure every file of the game and update is present before patching.
+    auto noProgress = []() { return true; };
+    if (!checkFiles({ GameFiles, GameFilesSize }, GameHashes, baseDirectory / GameDirectory, journal, noProgress, true))
+    {
+        journal.lastErrorMessage = fmt::format("\"{}\" folder: {}", GameDirectory, journal.lastErrorMessage);
+        return false;
+    }
+
+    if (!checkFiles({ UpdateFiles, UpdateFilesSize }, UpdateHashes, baseDirectory / UpdateDirectory, journal, noProgress, true))
+    {
+        journal.lastErrorMessage = fmt::format("\"{}\" folder: {}", UpdateDirectory, journal.lastErrorMessage);
+        return false;
+    }
+
+    std::filesystem::path patchedDirectory = baseDirectory / PatchedDirectory;
+    if (!std::filesystem::exists(patchedDirectory) && !std::filesystem::create_directories(patchedDirectory, ec))
+    {
+        journal.lastResult = Journal::Result::DirectoryCreationFailed;
+        journal.lastErrorMessage = "Unable to create directory at " + fromPath(patchedDirectory);
+        return false;
+    }
+
+    std::filesystem::path baseXexPath = baseDirectory / GameDirectory / GameExecutableFile;
+    std::filesystem::path patchPath = baseDirectory / UpdateDirectory / UpdateExecutablePatchFile;
+    std::filesystem::path patchedXexPath = patchedDirectory / GameExecutableFile;
+    XexPatcher::Result patcherResult = XexPatcher::apply(baseXexPath, patchPath, patchedXexPath);
+    if (patcherResult != XexPatcher::Result::Success)
+    {
+        std::filesystem::remove(patchedXexPath, ec);
+        journal.lastResult = Journal::Result::PatchProcessFailed;
+        journal.lastPatcherResult = patcherResult;
+        journal.lastErrorMessage = fmt::format("Patching the game executable failed (error {}). Make sure the \"game\" and \"update\" folders come from the same copy of the game.", (int)patcherResult);
+        return false;
+    }
+
+    return true;
+}
+
 void Installer::rollback(Journal &journal)
 {
     std::error_code ec;
