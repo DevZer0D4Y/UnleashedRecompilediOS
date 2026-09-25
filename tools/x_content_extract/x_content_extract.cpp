@@ -1,8 +1,11 @@
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -25,7 +28,8 @@ static bool EndsWithInsensitive(const std::string& value, const std::string& suf
     return ToLower(value.substr(value.size() - suffix.size())) == ToLower(suffix);
 }
 
-static std::optional<std::string> FindPathByCandidates(const std::map<std::string, std::tuple<size_t, size_t>>& fileMap, const std::vector<std::string>& candidates)
+template<typename T>
+static std::optional<std::string> FindPathByCandidates(const std::map<std::string, T>& fileMap, const std::vector<std::string>& candidates)
 {
     for (const std::string& candidate : candidates)
     {
@@ -45,10 +49,11 @@ static std::optional<std::string> FindPathByCandidates(const std::map<std::strin
     return std::nullopt;
 }
 
-static bool WriteFileFromVfs(const VirtualFileSystem& vfs, const std::string& sourcePath, const std::filesystem::path& outPath)
+static bool WriteFileFromVfs(VirtualFileSystem& vfs, const std::string& sourcePath, const std::filesystem::path& outPath)
 {
+    // Empty files are valid, but the loader treats a size of zero as a failure.
     std::vector<uint8_t> bytes;
-    if (!vfs.load(sourcePath, bytes))
+    if (vfs.getSize(sourcePath) > 0 && !vfs.load(sourcePath, bytes))
         return false;
 
     std::filesystem::create_directories(outPath.parent_path());
@@ -60,11 +65,43 @@ static bool WriteFileFromVfs(const VirtualFileSystem& vfs, const std::string& so
     return file.good();
 }
 
+// Extracts every file in a container, keeping its folder structure.
+template<typename T>
+static bool ExtractAll(VirtualFileSystem& vfs, const std::map<std::string, T>& fileMap, const std::filesystem::path& outDir)
+{
+    size_t count = 0;
+
+    for (const auto& [path, _] : fileMap)
+    {
+        std::string relativePath = path;
+        std::replace(relativePath.begin(), relativePath.end(), '\\', '/');
+
+        while (!relativePath.empty() && relativePath.front() == '/')
+            relativePath.erase(relativePath.begin());
+
+        if (relativePath.empty())
+            continue;
+
+        if (!WriteFileFromVfs(vfs, path, outDir / relativePath))
+        {
+            std::cerr << "Failed to extract " << path << "\n";
+            return false;
+        }
+
+        count++;
+    }
+
+    std::cout << "Extracted " << count << " files to " << outDir.string() << "\n";
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     std::filesystem::path isoPath;
     std::filesystem::path contentPath;
     std::filesystem::path outDir;
+    std::filesystem::path isoAllOutDir;
+    std::filesystem::path contentAllOutDir;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -75,9 +112,18 @@ int main(int argc, char** argv)
             contentPath = argv[++i];
         else if ((arg == "--out" || arg == "--out-dir") && i + 1 < argc)
             outDir = argv[++i];
+        else if (arg == "--iso-extract-all" && i + 1 < argc)
+            isoAllOutDir = argv[++i];
+        else if (arg == "--content-extract-all" && i + 1 < argc)
+            contentAllOutDir = argv[++i];
         else if (arg == "--help" || arg == "-h")
         {
-            std::cout << "Usage: x_content_extract --out <private-dir> [--iso <game.iso>] [--content <update-container>]\n";
+            std::cout << "Usage: x_content_extract [--out <private-dir>] [--iso <game.iso>] [--content <update-container>]\n"
+                         "                         [--iso-extract-all <dir>] [--content-extract-all <dir>]\n"
+                         "\n"
+                         "  --out                   Extracts default.xex and shader.ar from the ISO, and default.xexp from the container.\n"
+                         "  --iso-extract-all       Extracts every file in the ISO to a folder.\n"
+                         "  --content-extract-all   Extracts every file in the container to a folder.\n";
             return 0;
         }
         else
@@ -87,9 +133,9 @@ int main(int argc, char** argv)
         }
     }
 
-    if (outDir.empty())
+    if (outDir.empty() && isoAllOutDir.empty() && contentAllOutDir.empty())
     {
-        std::cerr << "Missing required --out <private-dir> argument\n";
+        std::cerr << "Nothing to do: provide --out, --iso-extract-all and/or --content-extract-all\n";
         return 2;
     }
 
@@ -102,6 +148,7 @@ int main(int argc, char** argv)
     bool extractedXex = false;
     bool extractedShader = false;
     bool extractedXexp = false;
+    bool extractedAll = true;
 
     if (!isoPath.empty())
     {
@@ -112,20 +159,26 @@ int main(int argc, char** argv)
             return 3;
         }
 
-        std::optional<std::string> xexPath = FindPathByCandidates(iso->fileMap, { "default.xex" });
-        std::optional<std::string> shaderPath = FindPathByCandidates(iso->fileMap, { "shader.ar" });
-
-        if (xexPath)
+        if (!outDir.empty())
         {
-            extractedXex = WriteFileFromVfs(*iso, *xexPath, outDir / "default.xex");
-            std::cout << "Extracted default.xex from ISO path: " << *xexPath << "\n";
+            std::optional<std::string> xexPath = FindPathByCandidates(iso->fileMap, { "default.xex" });
+            std::optional<std::string> shaderPath = FindPathByCandidates(iso->fileMap, { "shader.ar" });
+
+            if (xexPath)
+            {
+                extractedXex = WriteFileFromVfs(*iso, *xexPath, outDir / "default.xex");
+                std::cout << "Extracted default.xex from ISO path: " << *xexPath << "\n";
+            }
+
+            if (shaderPath)
+            {
+                extractedShader = WriteFileFromVfs(*iso, *shaderPath, outDir / "shader.ar");
+                std::cout << "Extracted shader.ar from ISO path: " << *shaderPath << "\n";
+            }
         }
 
-        if (shaderPath)
-        {
-            extractedShader = WriteFileFromVfs(*iso, *shaderPath, outDir / "shader.ar");
-            std::cout << "Extracted shader.ar from ISO path: " << *shaderPath << "\n";
-        }
+        if (!isoAllOutDir.empty())
+            extractedAll &= ExtractAll(*iso, iso->fileMap, isoAllOutDir);
     }
 
     if (!contentPath.empty())
@@ -137,25 +190,44 @@ int main(int argc, char** argv)
             return 4;
         }
 
-        std::optional<std::string> xexpPath = FindPathByCandidates(content->fileMap, { "default.xexp" });
-        if (xexpPath)
+        if (!outDir.empty())
         {
-            extractedXexp = WriteFileFromVfs(*content, *xexpPath, outDir / "default.xexp");
-            std::cout << "Extracted default.xexp from content path: " << *xexpPath << "\n";
+            std::optional<std::string> xexpPath = FindPathByCandidates(content->fileMap, { "default.xexp" });
+            if (xexpPath)
+            {
+                extractedXexp = WriteFileFromVfs(*content, *xexpPath, outDir / "default.xexp");
+                std::cout << "Extracted default.xexp from content path: " << *xexpPath << "\n";
+            }
         }
+
+        if (!contentAllOutDir.empty())
+            extractedAll &= ExtractAll(*content, content->fileMap, contentAllOutDir);
     }
 
-    if (!extractedXex)
-        std::cerr << "default.xex not extracted (provide --iso with valid game image)\n";
+    if (!extractedAll)
+        return 1;
 
-    if (!extractedShader)
-        std::cerr << "shader.ar not extracted (provide --iso with valid game image)\n";
+    // Only report files that were asked for, from the inputs that were given.
+    bool success = true;
 
-    if (!extractedXexp)
-        std::cerr << "default.xexp not extracted (provide --content with valid update container)\n";
+    if (!outDir.empty() && !isoPath.empty())
+    {
+        if (!extractedXex)
+            std::cerr << "default.xex not found in the ISO\n";
 
-    if (extractedXex && extractedShader && extractedXexp)
-        return 0;
+        if (!extractedShader)
+            std::cerr << "shader.ar not found in the ISO\n";
 
-    return 1;
+        success &= extractedXex && extractedShader;
+    }
+
+    if (!outDir.empty() && !contentPath.empty())
+    {
+        if (!extractedXexp)
+            std::cerr << "default.xexp not found in the container\n";
+
+        success &= extractedXexp;
+    }
+
+    return success ? 0 : 1;
 }
