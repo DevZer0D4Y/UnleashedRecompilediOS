@@ -346,6 +346,12 @@ static std::unique_ptr<RenderCommandFence> g_commandFences[NUM_FRAMES];
 static std::unique_ptr<RenderQueryPool> g_queryPools[NUM_FRAMES];
 static bool g_commandListStates[NUM_FRAMES];
 
+// WaitForGPU() can be called from the present thread while the render thread is recording
+// the frame's command list, so it must never reuse one of the per-frame command lists.
+static Mutex g_waitForGPUMutex;
+static std::unique_ptr<RenderCommandList> g_waitForGPUCommandList;
+static std::unique_ptr<RenderCommandFence> g_waitForGPUCommandFence;
+
 static Mutex g_copyMutex;
 static std::unique_ptr<RenderCommandQueue> g_copyQueue;
 static std::unique_ptr<RenderCommandList> g_copyCommandList;
@@ -1969,6 +1975,9 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
     for (auto& commandFence : g_commandFences)
         commandFence = g_device->createCommandFence();
 
+    g_waitForGPUCommandList = g_queue->createCommandList();
+    g_waitForGPUCommandFence = g_device->createCommandFence();
+
     for (auto& queryPool : g_queryPools)
         queryPool = g_device->createQueryPool(NUM_QUERIES);
 
@@ -2203,6 +2212,8 @@ static std::unordered_map<uint16_t, std::unique_ptr<GuestTexture>> g_xdbfTexture
 
 void Video::WaitForGPU()
 {
+    std::lock_guard lock(g_waitForGPUMutex);
+
     g_waitForGPUCount++;
 
     // Wait for all queued frames to finish.
@@ -2216,10 +2227,12 @@ void Video::WaitForGPU()
     }
 
     // Execute an empty command list and wait for it to end to guarantee that any remaining presentation has finished.
-    g_commandLists[0]->begin();
-    g_commandLists[0]->end();
-    g_queue->executeCommandLists(g_commandLists[0].get(), g_commandFences[0].get());
-    g_queue->waitForCommandFence(g_commandFences[0].get());
+    // Reusing the first frame's command list here used to break the frame the render thread was recording when the
+    // installer handed over to the game. On Metal, that frame's fence was then never signaled and the game hung.
+    g_waitForGPUCommandList->begin();
+    g_waitForGPUCommandList->end();
+    g_queue->executeCommandLists(g_waitForGPUCommandList.get(), g_waitForGPUCommandFence.get());
+    g_queue->waitForCommandFence(g_waitForGPUCommandFence.get());
 }
 
 static uint32_t CreateDevice(uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5, be<uint32_t>* a6)
