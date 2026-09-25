@@ -7,6 +7,8 @@ constexpr size_t RESERVED_BEGIN = 0x7FEA0000;
 constexpr size_t RESERVED_END = 0xA0000000;
 
 #ifdef UNLEASHED_RECOMP_IOS
+#include <unistd.h>
+
 // Freed guest memory stays resident unless its pages are given back to the OS, and every dirty page counts against the
 // memory limit of an iOS app. o1heap doesn't reuse freed memory in address order, so the set of touched pages keeps
 // growing every time a stage gets loaded until iOS terminates the game. Only large blocks are worth a system call.
