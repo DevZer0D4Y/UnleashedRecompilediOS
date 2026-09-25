@@ -146,11 +146,16 @@ set(UNLEASHED_RECOMP_CPU_CXX_SOURCES
 )
 
 set(UNLEASHED_RECOMP_GPU_CXX_SOURCES
+    "gpu/bc_decoder.cpp"
     "gpu/video.cpp"
     "gpu/imgui/imgui_common.cpp"
     "gpu/imgui/imgui_font_builder.cpp"
     "gpu/imgui/imgui_snapshot.cpp"
 )
+
+if (UNLEASHED_RECOMP_IOS)
+    list(APPEND UNLEASHED_RECOMP_GPU_CXX_SOURCES "gpu/ios_metal.mm")
+endif()
 
 set(UNLEASHED_RECOMP_APU_CXX_SOURCES
     "apu/audio.cpp"
