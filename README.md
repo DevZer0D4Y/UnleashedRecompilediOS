@@ -30,20 +30,22 @@ YouTube: https://www.youtube.com/@develop_erZ
 
 ## Minimum System Requirements
 
-- CPU with support for the AVX instruction set:
-tested on A16 Bionic, may support older.
-- GPU with support for Direct3D 12.0 (Shader Model 6) or Vulkan 1.2:
-A16 Bionic (iPhone 14 Pro) for 61% resolution scale @ 30-60FPS
+- Device:
+  - iPhone or iPad with a 64-bit Apple chip and Metal support.
+  - Tested on A16 Bionic (iPhone 14 Pro) at 61% resolution scale, running at 30-60 FPS. Older chips may work at lower resolution scales, but are untested.
 - Memory:
-  4 GB for iOS, recommend 6.
+  - 4 GB of RAM minimum.
+  - 6 GB recommended (e.g. iPhone 13 Pro, iPhone 14 or newer), as 4 GB devices are more likely to be closed by iOS when memory runs low.
 - Operating System:
-  iOS 15.0
+  - iOS / iPadOS 15.0 or newer.
+- Controller:
+  - An MFi, Xbox or PlayStation controller is required, as there are no touch controls yet. See [the controls FAQ](#i-cant-do-anything-on-ios-what-are-the-controls).
 - Storage:
   - With DLC: 10 GiB required
   - Without DLC: 6 GiB required
 
 > [!NOTE]
-> More storage space may be required if uncompressed game files are provided during installation.
+> Extra space is needed for the app itself, and temporarily for any `.zip` or other archive you copy to your device before extracting the game files.
 
 ## How to Install
 
