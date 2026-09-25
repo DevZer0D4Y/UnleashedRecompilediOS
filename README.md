@@ -25,6 +25,7 @@ YouTube: https://www.youtube.com/@develop_erZ
 - [How to Install](#how-to-install)
     - [Installing on iPhone/iPad without a PC](#installing-on-iphoneipad-without-a-pc)
 - [How do I change the game's language?](#how-do-i-change-the-games-language)
+- [What's New in This Port](#whats-new-in-this-port)
 - [Features](#features)
 - [Credits](#credits)
 
@@ -101,6 +102,43 @@ YouTube: https://www.youtube.com/@develop_erZ
 
 > [!NOTE]
 > Please note that it is **not possible** to complete the installation if your files have been **modified**. In case of other problems such as black screens or crashes, **do not try to reinstall the game** as it is not possible for the process to result in an invalid installation.
+
+## What's New in This Port
+
+A list of everything fixed and added in this iOS port, on top of the original Unleashed Recompiled.
+
+### New Features
+
+- **Install without a PC:** copy your `game`, `update` and `dlc` folders into the app's folder with the Files app and open the game. It checks the files, sets itself up and starts, with no installer screens. DLC folders can have any name. See [Installing on iPhone/iPad without a PC](#installing-on-iphoneipad-without-a-pc).
+- **Touch controls:** an on-screen gamepad modelled on [XeniOS](https://github.com/xenios-jp/XeniOS): a stick with a D-Pad ring, swipe anywhere to move the camera, all face, shoulder and trigger buttons, and haptic feedback. They hide when you use a controller and come back when you touch the screen. See [What are the controls on iOS?](#what-are-the-controls-on-ios).
+- **Touch layout editor:** tap **EDIT** to move, resize and hide controls and change their transparency. Layouts are saved to `touch_layout.toml`.
+- **Your phone's language on first launch:** the game starts in your iPhone's language if it's supported, instead of always starting in English.
+- **Up to 120 Hz** on ProMotion iPhones and iPads.
+
+### iOS Fixes
+
+- **Stuck after the installer:** the game could hang forever when the installer handed over to the game. Fixed.
+- **Restarting the game:** iOS apps can't relaunch themselves, so options that need a restart did nothing. The game now saves your settings and asks you to reopen it.
+- **Broken textures:** most iPhones can't read the Xbox's compressed texture formats (BC1 to BC7), which showed up as corrupted textures. They're now converted while loading, on devices that need it.
+- **Memory growing during long sessions:** freed memory is now handed back to iOS, and temporary graphics objects that used to pile up are cleaned up, so the game is less likely to be closed after playing for a while.
+- **Random freezes:** some thread synchronisation code could fail at random on Apple's ARM chips and leave the game stuck. It now retries properly.
+- **Going to the background:** rendering now pauses while the app is in the background and resumes when you come back, as iOS doesn't allow graphics work in the background. Ported from upstream.
+- **Older and 4 GB devices:** the app now requests Apple's Extended Virtual Addressing and Increased Memory Limit permissions, needed for the game's 4 GB memory reservation and to give low-RAM devices more room.
+- **Button prompts:** touching the screen no longer switches the button prompts to keyboard and mouse icons.
+
+### Graphics Backend (plume)
+
+The Metal backend now uses [a fork of plume](https://github.com/DevZer0D4Y/plume/tree/ios-unleashed) with iOS build support, fixes for memory leaks in Metal, a buffer overrun fix and a fix for iOS versions older than 16.
+
+### Fixes From Upstream Unleashed Recompiled
+
+- The Werehog no longer rotates into walls when leaving them at high frame rates.
+- Controller rumble strength is no longer multiplied incorrectly.
+
+### Documentation
+
+- Guides for installing without a PC, the touch controls and their editor, and changing the language.
+- Corrected system requirements for iPhone and iPad.
 
 ## Features
 
