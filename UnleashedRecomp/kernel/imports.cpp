@@ -58,8 +58,10 @@ struct Event final : KernelObject, HostObject<XKEVENT>
             {
                 while (true)
                 {
+                    // This must not use a weak exchange. Those can fail spuriously on ARM while the event is
+                    // still set, and waiting for it to change would then block even though it's signaled.
                     bool expected = true;
-                    if (signaled.compare_exchange_weak(expected, false))
+                    if (signaled.compare_exchange_strong(expected, false))
                         break;
 
                     signaled.wait(expected);
@@ -114,8 +116,10 @@ struct Semaphore final : KernelObject, HostObject<XKSEMAPHORE>
     {
         if (timeout == 0)
         {
+            // Retry until the count is actually zero. A failed exchange can be spurious (on ARM)
+            // or caused by another thread changing the count, neither of which means a timeout.
             uint32_t currentCount = count.load();
-            if (currentCount != 0)
+            while (currentCount != 0)
             {
                 if (count.compare_exchange_weak(currentCount, currentCount - 1))
                     return STATUS_SUCCESS;
@@ -699,7 +703,9 @@ void RtlEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
     {
         uint32_t previousOwner = 0;
 
-        if (owningThread.compare_exchange_weak(previousOwner, thisThread) || previousOwner == thisThread)
+        // This must not use a weak exchange. Those can fail spuriously on ARM while the critical section is free,
+        // and waiting for the owner to change would then block until another thread happens to enter it.
+        if (owningThread.compare_exchange_strong(previousOwner, thisThread) || previousOwner == thisThread)
         {
             cs->RecursionCount++;
             return;
@@ -1207,7 +1213,8 @@ bool RtlTryEnterCriticalSection(XRTL_CRITICAL_SECTION* cs)
 
     uint32_t previousOwner = 0;
 
-    if (owningThread.compare_exchange_weak(previousOwner, thisThread) || previousOwner == thisThread)
+    // A weak exchange could spuriously report the critical section as taken on ARM.
+    if (owningThread.compare_exchange_strong(previousOwner, thisThread) || previousOwner == thisThread)
     {
         cs->RecursionCount++;
         return true;
