@@ -18,7 +18,8 @@
 #define TOUCH_CONTROLS_SUPPORTED 0
 #endif
 
-// Tuning values match the XeniOS defaults.
+// Layout frames and tuning values match the XeniOS defaults (https://github.com/xenios-jp/XeniOS,
+// src/xenia/hid/touch). Xenia is Copyright (c) 2015 Ben Vanik, released under the BSD license.
 static constexpr float STICK_DEADZONE = 0.14f;
 static constexpr float STICK_ACTIVATION_RADIUS = 0.48f;
 static constexpr float STICK_DPAD_RING_RADIUS = 0.32f;
