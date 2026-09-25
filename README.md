@@ -38,8 +38,8 @@ YouTube: https://www.youtube.com/@develop_erZ
   - 6 GB recommended (e.g. iPhone 13 Pro, iPhone 14 or newer), as 4 GB devices are more likely to be closed by iOS when memory runs low.
 - Operating System:
   - iOS / iPadOS 15.0 or newer.
-- Controller:
-  - An MFi, Xbox or PlayStation controller is required, as there are no touch controls yet. See [the controls FAQ](#i-cant-do-anything-on-ios-what-are-the-controls).
+- Controls:
+  - Built-in touch controls, or an MFi, Xbox or PlayStation controller (recommended). See [the controls FAQ](#what-are-the-controls-on-ios).
 - Storage:
   - With DLC: 10 GiB required
   - Without DLC: 6 GiB required
@@ -213,15 +213,31 @@ The installer may display this error for several reasons. Please check the follo
 
 - The installer will only accept **original and unmodified files**. Do not attempt to provide modified files to the installer.
 
-### I can't do anything on iOS, what are the controls?
+### What are the controls on iOS?
 
-Currently, there are no touch controls for iOS implemented outside of the installer. If you'd like them, please make a feature suggestion in my discord (if there's not one already and I can probably add some basic ones), but for now I have no plans on doing them.
+The game has on-screen touch controls, laid out like the ones in XeniOS:
+
+- **Left stick:** drag inside the circle on the bottom left. Tap the arrows on its outer ring for the D-Pad.
+- **Camera (right stick):** swipe anywhere on the screen that isn't a button.
+- **A, B, X, Y:** the diamond of buttons on the right.
+- **LT, RT:** the wide buttons above the stick and above the face buttons.
+- **LB, RB, BACK, START:** along the top of the screen.
+
+A controller (MFi, Xbox or PlayStation) is still the best way to play. The touch controls hide themselves as soon as you use a controller, and come back when you touch the screen.
+
+You can change them in `config.toml` (see [How do I change the game's language?](#how-do-i-change-the-games-language) for where to find it), under `[Input]`:
+
+```toml
+[Input]
+TouchControls = false       # turn the touch controls off completely
+TouchControlsOpacity = 0.5  # from 0.0 (invisible) to 1.0 (default)
+```
 
 ### How do I change the game's language?
 
 The game starts in English. You can switch the text and voices at any time, and your choice is saved.
 
-**From the game (requires a controller):**
+**From the game:**
 
 1) From the title screen or the pause menu, open **Options** → **System**.
 2) Change **Language** for the text and menus: English, Japanese, German, French, Spanish or Italian.
