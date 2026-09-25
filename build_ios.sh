@@ -130,7 +130,7 @@ find_file() {
 XEX="$(find_file default.xex)"
 XEXP="$(find_file default.xexp)"
 [[ -n "$XEX" ]] || fail "default.xex not found. It's in the base game's main folder, or inside its disc image or package."
-[[ -n "$XEXP" ]] || fail "default.xexp not found. It comes from the game's title update, which isn't on the disc: download it on your Xbox 360, then copy it from Content/0000000000000000/534507D4/000B0000/ on the console's drive into $GAME_DIR (see docs/DUMPING-en.md)."
+[[ -n "$XEXP" ]] || fail "default.xexp not found. It comes from the game's title update, which isn't on the disc: download it on your Xbox 360, then copy the file starting with TU_19KA20I from /Content/Cache/ on the console's drive into $GAME_DIR (see docs/DUMPING-en.md)."
 
 # shader.ar sits next to the base game's default.xex.
 SHADER="$(dirname "$XEX")/shader.ar"
