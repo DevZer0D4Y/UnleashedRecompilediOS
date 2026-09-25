@@ -28,6 +28,7 @@
 #include <ui/options_menu.h>
 #include <ui/game_window.h>
 #include <ui/black_bar.h>
+#include <ui/touch_controls.h>
 #include <patches/aspect_ratio_patches.h>
 #include <user/config.h>
 #include <user/paths.h>
@@ -1514,6 +1515,7 @@ static void CreateImGuiBackend()
     MessageWindow::Init();
     OptionsMenu::Init();
     InstallerWizard::Init();
+    TouchControls::Init();
 
     ImGui_ImplSDL2_InitForOther(GameWindow::s_pWindow);
 
@@ -2868,6 +2870,7 @@ static void DrawImGui()
     ButtonGuide::Draw();
     Fader::Draw();
     BlackBar::Draw();
+    TouchControls::Draw(float(width), float(height), mousePosOffsetX, mousePosOffsetY);
 
     assert(ImGui::GetBackgroundDrawList()->_ClipRectStack.Size == 1 && "Some clip rects were not removed from the stack!");
 

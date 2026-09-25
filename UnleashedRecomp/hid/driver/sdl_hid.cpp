@@ -4,6 +4,7 @@
 #include <hid/hid.h>
 #include <os/logger.h>
 #include <ui/game_window.h>
+#include <ui/touch_controls.h>
 #include <kernel/xdm.h>
 #include <app.h>
 
@@ -264,6 +265,7 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
                 {
                     SDL_ShowCursor(SDL_DISABLE);
                     SetControllerInputDevice(controller);
+                    TouchControls::OnPhysicalControllerInput();
                 }
 
                 controller->PollAxis();
@@ -272,6 +274,7 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
             {
                 SDL_ShowCursor(SDL_DISABLE);
                 SetControllerInputDevice(controller);
+                TouchControls::OnPhysicalControllerInput();
 
                 controller->Poll();
             }
@@ -288,6 +291,10 @@ int HID_OnSDLEvent(void*, SDL_Event* event)
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
         {
+            // Mouse events synthesised from touches shouldn't switch the button prompts to keyboard and mouse.
+            if (event->motion.which == SDL_TOUCH_MOUSEID)
+                break;
+
             if (!GameWindow::IsFullscreen() || GameWindow::s_isFullscreenCursorVisible)
                 SDL_ShowCursor(SDL_ENABLE);
 
@@ -352,10 +359,13 @@ uint32_t hid::GetState(uint32_t dwUserIndex, XAMINPUT_STATE* pState)
 
     pState->dwPacketNumber = packet++;
 
-    if (!g_activeController)
+    if (!g_activeController && !TouchControls::IsActive())
         return ERROR_DEVICE_NOT_CONNECTED;
 
-    pState->Gamepad = g_activeController->state;
+    if (g_activeController)
+        pState->Gamepad = g_activeController->state;
+
+    TouchControls::Apply(pState->Gamepad);
 
     return ERROR_SUCCESS;
 }
@@ -366,7 +376,7 @@ uint32_t hid::SetState(uint32_t dwUserIndex, XAMINPUT_VIBRATION* pVibration)
         return ERROR_BAD_ARGUMENTS;
 
     if (!g_activeController)
-        return ERROR_DEVICE_NOT_CONNECTED;
+        return TouchControls::IsActive() ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED;
 
     g_activeController->SetVibration(*pVibration);
 
@@ -378,7 +388,7 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
     if (!pCaps)
         return ERROR_BAD_ARGUMENTS;
 
-    if (!g_activeController)
+    if (!g_activeController && !TouchControls::IsActive())
         return ERROR_DEVICE_NOT_CONNECTED;
 
     memset(pCaps, 0, sizeof(*pCaps));
@@ -386,8 +396,12 @@ uint32_t hid::GetCapabilities(uint32_t dwUserIndex, XAMINPUT_CAPABILITIES* pCaps
     pCaps->Type = XAMINPUT_DEVTYPE_GAMEPAD;
     pCaps->SubType = XAMINPUT_DEVSUBTYPE_GAMEPAD; // TODO: other types?
     pCaps->Flags = 0;
-    pCaps->Gamepad = g_activeController->state;
-    pCaps->Vibration = g_activeController->vibration;
+
+    if (g_activeController)
+    {
+        pCaps->Gamepad = g_activeController->state;
+        pCaps->Vibration = g_activeController->vibration;
+    }
 
     return ERROR_SUCCESS;
 }
