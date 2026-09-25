@@ -42,10 +42,10 @@
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
-#include <mach/mach.h>
 #endif
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
+#include <os/proc.h>
 #include "ios_metal.h"
 #endif
 
@@ -663,6 +663,7 @@ static IntermediaryUploadAllocator g_intermediaryUploadAllocator;
 
 static std::vector<GuestResource*> g_tempResources[NUM_FRAMES];
 static std::vector<std::unique_ptr<RenderBuffer>> g_tempBuffers[NUM_FRAMES];
+static std::vector<std::unique_ptr<RenderPipeline>> g_tempPipelines[NUM_FRAMES];
 
 template<GuestPrimitiveType PrimitiveType>
 struct PrimitiveIndexData
@@ -818,6 +819,7 @@ static void DestructTempResources()
 
     g_tempResources[g_frame].clear();
     g_tempBuffers[g_frame].clear();
+    g_tempPipelines[g_frame].clear();
 }
 
 static std::thread::id g_presentThreadId = std::this_thread::get_id();
@@ -1428,6 +1430,28 @@ static std::unique_ptr<RenderPipelineLayout> g_imPipelineLayout;
 static std::unique_ptr<RenderPipeline> g_imPipeline;
 static std::unique_ptr<RenderPipeline> g_imAdditivePipeline;
 
+#ifdef __APPLE__
+extern "C" void* objc_autoreleasePoolPush(void);
+extern "C" void objc_autoreleasePoolPop(void* pool);
+#endif
+
+// The Metal backend creates an autoreleased command buffer on every submission. Submissions happen on threads
+// that never drain an autorelease pool (the render thread and the game's loading threads), so these command
+// buffers would never be freed without one.
+struct ScopedAutoreleasePool
+{
+#ifdef __APPLE__
+    void* pool = objc_autoreleasePoolPush();
+#endif
+
+    ~ScopedAutoreleasePool()
+    {
+#ifdef __APPLE__
+        objc_autoreleasePoolPop(pool);
+#endif
+    }
+};
+
 template<typename T>
 static void ExecuteCopyCommandList(const T& function)
 {
@@ -1436,7 +1460,12 @@ static void ExecuteCopyCommandList(const T& function)
     g_copyCommandList->begin();
     function();
     g_copyCommandList->end();
-    g_copyQueue->executeCommandLists(g_copyCommandList.get(), g_copyCommandFence.get());
+
+    {
+        ScopedAutoreleasePool autoreleasePool;
+        g_copyQueue->executeCommandLists(g_copyCommandList.get(), g_copyCommandFence.get());
+    }
+
     g_copyQueue->waitForCommandFence(g_copyCommandFence.get());
 }
 
@@ -2246,7 +2275,12 @@ void Video::WaitForGPU()
     // installer handed over to the game. On Metal, that frame's fence was then never signaled and the game hung.
     g_waitForGPUCommandList->begin();
     g_waitForGPUCommandList->end();
-    g_queue->executeCommandLists(g_waitForGPUCommandList.get(), g_waitForGPUCommandFence.get());
+
+    {
+        ScopedAutoreleasePool autoreleasePool;
+        g_queue->executeCommandLists(g_waitForGPUCommandList.get(), g_waitForGPUCommandFence.get());
+    }
+
     g_queue->waitForCommandFence(g_waitForGPUCommandFence.get());
 }
 
@@ -2728,17 +2762,9 @@ static void DrawFPS()
 #if defined(__APPLE__) && TARGET_OS_IOS
 static uint64_t GetIOSFreeMemoryBytes()
 {
-    mach_port_t hostPort = mach_host_self();
-    vm_size_t pageSize = 0;
-    if (host_page_size(hostPort, &pageSize) != KERN_SUCCESS)
-        return 0;
-
-    vm_statistics64_data_t vmStats{};
-    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
-    if (host_statistics64(hostPort, HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&vmStats), &count) != KERN_SUCCESS)
-        return 0;
-
-    return (uint64_t(vmStats.free_count) + uint64_t(vmStats.inactive_count)) * uint64_t(pageSize);
+    // How much more memory the app can use before iOS terminates it. System wide free memory
+    // is not a useful metric, as iOS keeps it low regardless of how much the app is using.
+    return os_proc_available_memory();
 }
 
 static void DrawIOSLowMemoryWarning()
@@ -3243,6 +3269,8 @@ static void ProcExecuteCommandList(const RenderCommand& cmd)
     commandList->writeTimestamp(g_queryPools[g_frame].get(), 1);
     commandList->end();
 
+    ScopedAutoreleasePool autoreleasePool;
+
     if (g_swapChainValid)
     {
         const RenderCommandList *commandLists[] = { commandList.get() };
@@ -3276,7 +3304,15 @@ static void ProcTrimRuntimeCaches(const RenderCommand&)
 {
     const size_t pipelinesBefore = g_pipelines.size();
 
+    // Pipelines can still be bound to the command list being recorded or used by frames in flight,
+    // so keep them alive until the temporary resources of this frame get destructed.
+    for (auto& [hash, pipeline] : g_pipelines)
+        g_tempPipelines[g_frame].emplace_back(std::move(pipeline));
+
     g_pipelines.clear();
+
+    // Make sure the next draw doesn't keep using the pipeline that is currently bound.
+    g_dirtyStates.pipelineState = true;
 
 #ifdef PSO_CACHING
     {
@@ -3285,20 +3321,7 @@ static void ProcTrimRuntimeCaches(const RenderCommand&)
     }
 #endif
 
-    for (size_t i = 0; i < g_shaderCacheEntryCount; i++)
-    {
-        auto* shader = g_shaderCacheEntries[i].guestShader;
-        if (shader == nullptr)
-            continue;
-
-        std::lock_guard lock(shader->mutex);
-        shader->linkedShaders.clear();
-#ifdef UNLEASHED_RECOMP_D3D12
-        shader->shaderBlobs.clear();
-#endif
-    }
-
-    os::logger::Log(fmt::format("TrimRuntimeCaches - pipelines: {} -> 0", pipelinesBefore));
+    LOGFN("TrimRuntimeCaches - pipelines: {} -> 0", pipelinesBefore);
 }
 
 void Video::QueueTrimRuntimeCaches()

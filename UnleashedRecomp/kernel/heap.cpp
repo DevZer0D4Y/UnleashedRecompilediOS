@@ -6,6 +6,50 @@
 constexpr size_t RESERVED_BEGIN = 0x7FEA0000;
 constexpr size_t RESERVED_END = 0xA0000000;
 
+#ifdef UNLEASHED_RECOMP_IOS
+// Freed guest memory stays resident unless its pages are given back to the OS, and every dirty page counts against the
+// memory limit of an iOS app. o1heap doesn't reuse freed memory in address order, so the set of touched pages keeps
+// growing every time a stage gets loaded until iOS terminates the game. Only large blocks are worth a system call.
+constexpr size_t DISCARD_THRESHOLD = 64 * 1024;
+
+static void DiscardPages(void* address, size_t size)
+{
+    // Replacing the pages with fresh anonymous memory releases them immediately.
+    // MADV_DONTNEED only deactivates them on Darwin, which doesn't reduce the app's footprint.
+    void* result = mmap(address, size, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANON, -1, 0);
+    assert(result == address);
+    (void)result;
+}
+#endif
+
+static void FreeFragment(O1HeapInstance* heap, void* ptr)
+{
+#ifdef UNLEASHED_RECOMP_IOS
+    if (ptr == nullptr)
+        return;
+
+    static const uintptr_t s_pageSize = uintptr_t(sysconf(_SC_PAGESIZE));
+
+    // Relies on the fragment header in o1heap.c, like Heap::Size.
+    uintptr_t blockBegin = uintptr_t(ptr) - O1HEAP_ALIGNMENT;
+    uintptr_t blockEnd = blockBegin + *((size_t*)ptr - 2);
+
+    void* unusedBegin;
+    void* unusedEnd;
+    o1heapFreeAndGetUnusedRange(heap, ptr, &unusedBegin, &unusedEnd);
+
+    // Only discard the pages overlapping this block that are now entirely free. Pages that only
+    // overlap free neighbors were already considered when those neighbors got freed.
+    uintptr_t begin = std::max(blockBegin & ~(s_pageSize - 1), (uintptr_t(unusedBegin) + s_pageSize - 1) & ~(s_pageSize - 1));
+    uintptr_t end = std::min((blockEnd + s_pageSize - 1) & ~(s_pageSize - 1), uintptr_t(unusedEnd) & ~(s_pageSize - 1));
+
+    if (end > begin && (end - begin) >= DISCARD_THRESHOLD)
+        DiscardPages((void*)begin, end - begin);
+#else
+    o1heapFree(heap, ptr);
+#endif
+}
+
 void Heap::Init()
 {
     heap = o1heapInit(g_memory.Translate(0x20000), RESERVED_BEGIN - 0x20000);
@@ -40,12 +84,12 @@ void Heap::Free(void* ptr)
     if (ptr >= physicalHeap)
     {
         std::lock_guard lock(physicalMutex);
-        o1heapFree(physicalHeap, *((void**)ptr - 1));
+        FreeFragment(physicalHeap, *((void**)ptr - 1));
     }
     else
     {
         std::lock_guard lock(mutex);
-        o1heapFree(heap, ptr);
+        FreeFragment(heap, ptr);
     }
 }
 
