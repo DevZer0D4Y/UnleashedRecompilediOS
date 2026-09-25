@@ -38,16 +38,78 @@ step "Updating submodules"
 git submodule sync --recursive
 git submodule update --init --recursive
 
-step "Finding the game files in $GAME_DIR"
+# The macOS build provides the tools used below: the package extractor and the recompilers.
+step "Configuring the macOS tools build"
+cmake --preset "$MAC_PRESET"
+
+step "Unpacking Xbox 360 packages in $GAME_DIR"
+# Title updates, DLC and Games on Demand copies often come as raw STFS packages (files starting with CON, LIVE or PIRS)
+# rather than folders. Unpack them into a phone-ready folder: out/game_files/{game,update,dlc}.
+ninja -C "$MAC_BUILD" x_content_extract
+EXTRACTOR="$(find "$MAC_BUILD" -type f -name x_content_extract -perm -u+x | head -n 1)"
+[[ -n "$EXTRACTOR" ]] || fail "The package extractor didn't build."
+
+GAME_FILES="$REPO/out/game_files"
+UNPACK_TMP="$REPO/out/game_files_tmp"
+rm -rf "$GAME_FILES" "$UNPACK_TMP"
+mkdir -p "$GAME_FILES"
+
+is_package() {
+    local magic
+    magic="$(head -c 4 "$1" 2>/dev/null || true)"
+    [[ "$magic" == "CON " || "$magic" == "LIVE" || "$magic" == "PIRS" ]]
+}
+
+package_index=0
+while IFS= read -r -d '' file; do
+    is_package "$file" || continue
+
+    package_index=$((package_index + 1))
+    unpacked="$UNPACK_TMP/$package_index"
+
+    if ! "$EXTRACTOR" --content "$file" --content-extract-all "$unpacked" >/dev/null; then
+        echo "  Skipped $(basename "$file"): couldn't be unpacked"
+        continue
+    fi
+
+    if [[ -f "$unpacked/default.xexp" ]]; then
+        rm -rf "$GAME_FILES/update"
+        mv "$unpacked" "$GAME_FILES/update"
+        echo "  Title update: $(basename "$file")"
+    elif [[ -f "$unpacked/DLC.xml" ]]; then
+        mkdir -p "$GAME_FILES/dlc"
+        mv "$unpacked" "$GAME_FILES/dlc/$(basename "$file")"
+        echo "  DLC:          $(basename "$file")"
+    elif [[ -f "$unpacked/default.xex" ]]; then
+        rm -rf "$GAME_FILES/game"
+        mv "$unpacked" "$GAME_FILES/game"
+        echo "  Base game:    $(basename "$file")"
+    else
+        echo "  Skipped $(basename "$file"): not the game, its update or DLC"
+    fi
+done < <(find "$GAME_DIR" -type f -size +100k -print0 2>/dev/null)
+
+# A disc image of the base game.
+if ! find "$GAME_DIR" -type f -iname default.xex ! -path "*/patched/*" 2>/dev/null | grep -q . && [[ ! -d "$GAME_FILES/game" ]]; then
+    ISO="$(find "$GAME_DIR" -type f -iname "*.iso" 2>/dev/null | head -n 1)"
+    if [[ -n "$ISO" ]]; then
+        "$EXTRACTOR" --iso "$ISO" --iso-extract-all "$GAME_FILES/game" >/dev/null || fail "Couldn't unpack $ISO."
+        echo "  Base game:    $(basename "$ISO")"
+    fi
+fi
+
+rm -rf "$UNPACK_TMP"
+
+step "Finding the game files"
 # Skip files this project generates, so a folder that was already set up by the game still works.
 find_file() {
-    find "$GAME_DIR" -type f -iname "$1" ! -path "*/patched/*" ! -iname "*_patched*" 2>/dev/null | head -n 1
+    find "$GAME_FILES" "$GAME_DIR" -type f -iname "$1" ! -path "*/patched/*" ! -iname "*_patched*" 2>/dev/null | head -n 1
 }
 
 XEX="$(find_file default.xex)"
 XEXP="$(find_file default.xexp)"
-[[ -n "$XEX" ]] || fail "default.xex not found. It's in the base game's main folder."
-[[ -n "$XEXP" ]] || fail "default.xexp not found. It comes from the title update, which must be extracted (not the raw update package)."
+[[ -n "$XEX" ]] || fail "default.xex not found. It's in the base game's main folder, or inside its disc image or package."
+[[ -n "$XEXP" ]] || fail "default.xexp not found. It comes from the title update. Put the extracted update folder or the update package file in $GAME_DIR."
 
 # shader.ar sits next to the base game's default.xex.
 SHADER="$(dirname "$XEX")/shader.ar"
@@ -76,7 +138,6 @@ echo "  Bundle ID: $BUNDLE_ID"
 
 # The iOS build can't run the recompilers itself, so generate the recompiled code, shaders and resources with a macOS build first.
 step "Recompiling the game code and shaders on the Mac (this takes a while)"
-cmake --preset "$MAC_PRESET"
 
 GENERATED=()
 while IFS= read -r target; do
@@ -178,3 +239,8 @@ echo
 echo "  The game files in UnleashedRecompLib/private are ignored by git, so they won't be committed."
 echo "  To test, install the IPA on your iPhone, then copy your game, update and dlc folders"
 echo "  into Files > On My iPhone > Unleashed > UnleashedRecomp."
+if [[ -n "$(ls -A "$GAME_FILES" 2>/dev/null)" ]]; then
+    echo
+    echo "  Packages were unpacked into folders ready to copy to your iPhone:"
+    ls -1 "$GAME_FILES" | sed "s|^|    $GAME_FILES/|"
+fi

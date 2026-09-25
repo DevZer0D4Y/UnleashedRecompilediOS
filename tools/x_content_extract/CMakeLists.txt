@@ -5,9 +5,20 @@ add_executable(x_content_extract
     "x_content_extract.cpp"
     "${CMAKE_SOURCE_DIR}/UnleashedRecomp/install/iso_file_system.cpp"
     "${CMAKE_SOURCE_DIR}/UnleashedRecomp/install/xcontent_file_system.cpp"
+    "${UNLEASHED_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils/memory_mapped_file.cpp"
 )
 
 target_include_directories(x_content_extract PRIVATE
     "${CMAKE_SOURCE_DIR}/UnleashedRecomp"
     "${UNLEASHED_RECOMP_TOOLS_ROOT}/XenonRecomp/XenonUtils"
+)
+
+# The file system sources rely on the game's precompiled header for these.
+target_precompile_headers(x_content_extract PRIVATE
+    <cstdint>
+    <cstring>
+    <fstream>
+    <map>
+    <string>
+    <vector>
 )
