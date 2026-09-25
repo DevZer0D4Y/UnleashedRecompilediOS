@@ -151,5 +151,8 @@ open ./out/build/ios-xcode-debug/UnleashedRecomp.xcodeproj
 
 5. To build to an IPA, use the Archive feature in Xcode.
 
+> [!NOTE]
+> The app requests the **Extended Virtual Addressing** and **Increased Memory Limit** entitlements, which older and 4 GB devices need to run the game. If signing fails because your team doesn't support them, add both capabilities to your App ID in the Apple Developer portal, or configure with `-DUNLEASHED_RECOMP_IOS_EXTENDED_MEMORY=OFF` to build without them.
+
 > [!IMPORTANT]
 > Current iOS support is experimental and uses pre-generated recompilation/resource artifacts during cross-builds (host-side recompilers and desktop-native file pickers are skipped).
