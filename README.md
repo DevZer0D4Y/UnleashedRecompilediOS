@@ -224,6 +224,19 @@ The game has on-screen touch controls, laid out like the ones in XeniOS:
 
 A controller (MFi, Xbox or PlayStation) is still the best way to play. The touch controls hide themselves as soon as you use a controller, and come back when you touch the screen.
 
+#### Customising the touch controls
+
+Pause the game, then tap **EDIT** at the top of the screen to open the layout editor:
+
+- **Move** a control by dragging it.
+- **Resize** it by tapping it to select it, then using **SIZE -** and **SIZE +**.
+- **Hide** a control you don't need by selecting it and tapping **HIDE**. Hidden controls stay faintly visible in the editor, so you can select them and tap **SHOW** to bring them back.
+- **ALPHA -** and **ALPHA +** make all the controls more or less see-through.
+- **RESET** restores the default layout.
+- **DONE** saves your layout and goes back to the game.
+
+Your layout is saved to `touch_layout.toml`, in the same folder as `config.toml`. Delete that file to go back to the default layout.
+
 You can change them in `config.toml` (see [How do I change the game's language?](#how-do-i-change-the-games-language) for where to find it), under `[Input]`:
 
 ```toml
@@ -234,7 +247,7 @@ TouchControlsOpacity = 0.5  # from 0.0 (invisible) to 1.0 (default)
 
 ### How do I change the game's language?
 
-The game starts in English. You can switch the text and voices at any time, and your choice is saved.
+On first launch, the game uses your iPhone's language if it's one of the supported ones (English, Japanese, German, French, Spanish or Italian), and English otherwise. You can switch the text and voices at any time, and your choice is saved.
 
 **From the game:**
 
