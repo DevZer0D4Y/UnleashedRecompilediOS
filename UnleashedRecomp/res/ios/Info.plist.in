@@ -22,6 +22,8 @@
     <string>public.app-category.games</string>
     <key>LSSupportsGameMode</key>
     <true/>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
     <key>UIFileSharingEnabled</key>
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
