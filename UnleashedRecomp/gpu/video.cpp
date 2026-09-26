@@ -827,6 +827,9 @@ static std::thread::id g_presentThreadId = std::this_thread::get_id();
 static std::atomic<bool> g_readyForCommands;
 static std::atomic<bool> g_appSuspended;
 
+// Static initialization runs on the main thread, which is also where SDL events get pumped.
+static const std::thread::id g_eventThreadId = std::this_thread::get_id();
+
 PPC_FUNC_IMPL(__imp__sub_824ECA00);
 PPC_FUNC(sub_824ECA00)
 {
@@ -1783,10 +1786,6 @@ static void BeginCommandList()
     commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 1);
     commandList->setGraphicsDescriptorSet(g_textureDescriptorSet.get(), 2);
     commandList->setGraphicsDescriptorSet(g_samplerDescriptorSet.get(), 3);
-
-    // iOS doesn't allow GPU work while the app is in the background, so hold here until it's back.
-    if (g_appSuspended.load(std::memory_order_relaxed))
-        g_appSuspended.wait(true, std::memory_order_acquire);
 
     g_readyForCommands = true;
     g_readyForCommands.notify_one();
@@ -3053,22 +3052,25 @@ static bool g_pendingWaitOnSwapChain = true;
 
 void Video::HandleApplicationBackgroundState(bool isBackgrounded)
 {
-    if (isBackgrounded)
-    {
-        g_appSuspended.store(true, std::memory_order_release);
-        g_readyForCommands.store(false, std::memory_order_release);
-        g_pendingWaitOnSwapChain = false;
-        g_swapChainValid = false;
-        g_dirtyStates.viewport = true;
+    // Only flag the change here. This runs while events are being pumped, which on iOS happens on the game's
+    // main thread, so blocking or touching render state here would freeze the game. Present() does the waiting.
+    if (g_appSuspended.exchange(isBackgrounded, std::memory_order_acq_rel) != isBackgrounded)
+        LOGFN("Application {} the background.", isBackgrounded ? "entered" : "left");
+}
 
-        // Let work already submitted finish before iOS suspends the app.
-        if (g_queue != nullptr && g_waitForGPUCommandList != nullptr)
-            Video::WaitForGPU();
-    }
-    else
+// iOS doesn't allow GPU work in the background, so stop presenting new frames until the app is back.
+static void WaitWhileApplicationSuspended()
+{
+    while (g_appSuspended.load(std::memory_order_acquire))
     {
-        g_appSuspended.store(false, std::memory_order_release);
-        g_appSuspended.notify_all();
+        // The event telling us the app is back arrives on the main thread, so it has to keep pumping events.
+        if (std::this_thread::get_id() == g_eventThreadId)
+        {
+            SDL_PumpEvents();
+            SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 }
 
@@ -3098,6 +3100,8 @@ void Video::Present()
 
     if (logPresent)
         LOGFN("Video::Present begin - index: {}, frame: {}, swapChainValid: {}", presentLogIndex, g_frame, g_swapChainValid);
+
+    WaitWhileApplicationSuspended();
 
     g_readyForCommands = false;
 

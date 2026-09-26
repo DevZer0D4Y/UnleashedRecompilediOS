@@ -1,10 +1,25 @@
 #include "ios_scene.h"
 
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
 static UIWindowScene* g_scene = nil;
 static UIWindow* g_pendingWindow = nil;
+
+// Shown as soon as the scene connects, so iOS can end the launch screen right away instead of keeping it up
+// until the game creates its window, which happens much later.
+static UIWindow* g_placeholderWindow = nil;
+
+static void HidePlaceholderWindow()
+{
+    if (g_placeholderWindow == nil)
+        return;
+
+    g_placeholderWindow.hidden = YES;
+    [g_placeholderWindow release];
+    g_placeholderWindow = nil;
+}
 
 static void AttachToScene(UIWindow* window)
 {
@@ -18,6 +33,13 @@ static void AttachToScene(UIWindow* window)
     }
 
     [window makeKeyAndVisible];
+    [window layoutIfNeeded];
+
+    if (window != g_placeholderWindow)
+        HidePlaceholderWindow();
+
+    // Push the window change to the screen now. The game's loop doesn't give UIKit a chance to do it on its own.
+    [CATransaction flush];
 }
 
 // Windows created by SDL (the game window, and the extra window message boxes use) don't know about scenes,
@@ -67,6 +89,7 @@ static void AttachToScene(UIWindow* window)
     g_scene = (UIWindowScene*)scene;
 
     // SDL may have created its window before the scene connected.
+    // Otherwise, show a black window until it does.
     UIWindow* window = g_pendingWindow;
     if (window == nil)
     {
@@ -79,6 +102,20 @@ static void AttachToScene(UIWindow* window)
     {
         self.window = window;
         AttachToScene(window);
+    }
+    else
+    {
+        UIViewController* viewController = [[UIViewController alloc] init];
+        viewController.view.backgroundColor = [UIColor blackColor];
+
+        g_placeholderWindow = [[UIWindow alloc] initWithWindowScene:g_scene];
+        g_placeholderWindow.backgroundColor = [UIColor blackColor];
+        g_placeholderWindow.rootViewController = viewController;
+        [viewController release];
+
+        self.window = g_placeholderWindow;
+        [g_placeholderWindow makeKeyAndVisible];
+        [CATransaction flush];
     }
 }
 
@@ -98,6 +135,11 @@ static void AttachToScene(UIWindow* window)
 
 namespace ios_scene
 {
+    void FlushDisplayChanges()
+    {
+        [CATransaction flush];
+    }
+
     void WaitForScene()
     {
         // The scene connects while the run loop runs, shortly after launch. Wait for it (up to a few
