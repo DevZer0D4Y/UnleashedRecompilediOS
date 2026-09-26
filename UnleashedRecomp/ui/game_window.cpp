@@ -49,10 +49,13 @@ int Window_OnSDLEvent(void*, SDL_Event* event)
 
     switch (event->type)
     {
-        case SDL_APP_WILLENTERBACKGROUND:
+        // Only pause rendering once the app is actually in the background. Notification Center, Control Center
+        // and screenshots only make it inactive, and it can keep drawing then.
+        case SDL_APP_DIDENTERBACKGROUND:
             Video::HandleApplicationBackgroundState(true);
             break;
 
+        case SDL_APP_WILLENTERFOREGROUND:
         case SDL_APP_DIDENTERFOREGROUND:
             Video::HandleApplicationBackgroundState(false);
             break;
@@ -354,6 +357,9 @@ void GameWindow::Init(const char* sdlVideoDriver)
 
     if (s_renderWindow.view == nullptr)
         s_renderWindow.view = plume::ensureMetalLayerForIOSWindow(nullptr);
+
+    // Put the new Metal view on screen now, rather than on the next touch.
+    ios_scene::FlushDisplayChanges();
 #endif
 
     if (s_renderWindow.view != nullptr)
@@ -388,6 +394,10 @@ void GameWindow::Update()
 
     if (g_needsResize)
         s_isChangingDisplay = false;
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    ios_scene::FlushDisplayChanges();
+#endif
 }
 
 SDL_Surface* GameWindow::GetIconSurface(void* pIconBmp, size_t iconSize)
