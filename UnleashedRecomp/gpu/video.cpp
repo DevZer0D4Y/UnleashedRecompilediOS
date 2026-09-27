@@ -47,6 +47,7 @@
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 #include <os/proc.h>
+#include <ui/ios_scene.h>
 #include "ios_metal.h"
 #endif
 
@@ -328,6 +329,135 @@ static Profiler g_swapChainAcquireProfiler;
 
 static bool g_profilerVisible;
 static bool g_profilerWasToggled;
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+// Phones can't hold the frame rate at full resolution in stages, and slow down further as they heat up. Dynamic
+// resolution lowers the resolution 3D scenes are rendered at while the GPU falls behind, and raises it back once
+// there's room, with the resolution scale option as the maximum. The HUD and menus stay at full resolution. Every
+// change makes the game recreate its render targets, which causes a short hitch, so changes are kept rare.
+static std::atomic<float> g_dynamicResolutionFactor = 1.0f;
+#endif
+
+// The resolution scale the game renders at, which dynamic resolution can hold below the option.
+static float GetResolutionScale()
+{
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    if (Config::DynamicResolution)
+        return Config::ResolutionScale * g_dynamicResolutionFactor.load(std::memory_order_relaxed);
+#endif
+
+    return Config::ResolutionScale;
+}
+
+// Call once per frame, after presenting.
+static void UpdateDynamicResolution()
+{
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    using namespace std::chrono;
+
+    constexpr float MIN_FACTOR = 0.4f;
+    constexpr float FACTOR_STEP = 0.05f;
+    constexpr int SLOW_SECONDS_BEFORE_LOWERING = 2;
+    constexpr int MIN_FAST_SECONDS_BEFORE_RAISING = 10;
+    constexpr int MAX_FAST_SECONDS_BEFORE_RAISING = 120;
+
+    static auto s_windowStart = steady_clock::now();
+    static auto s_lastChange = s_windowStart;
+    static auto s_lastRaise = s_windowStart - hours(1);
+    static double s_frameMsSum;
+    static double s_gpuMsSum;
+    static double s_gpuWaitMsSum;
+    static uint32_t s_frameCount;
+    static int s_slowSeconds;
+    static int s_fastSeconds;
+    static int s_fastSecondsBeforeRaising = MIN_FAST_SECONDS_BEFORE_RAISING;
+    static float s_lastResolutionScale = Config::ResolutionScale;
+
+    auto now = steady_clock::now();
+    float previousFactor = g_dynamicResolutionFactor.load(std::memory_order_relaxed);
+    float factor = previousFactor;
+
+    if (!Config::DynamicResolution || s_lastResolutionScale != Config::ResolutionScale)
+    {
+        // Start over from the resolution picked in the options.
+        s_lastResolutionScale = Config::ResolutionScale;
+        s_fastSecondsBeforeRaising = MIN_FAST_SECONDS_BEFORE_RAISING;
+        factor = 1.0f;
+    }
+    else
+    {
+        double frameMs = g_presentProfiler.value.load();
+
+        // Leave out stalls, like loading hitches or coming back from the background.
+        if (frameMs < 250.0)
+        {
+            s_frameMsSum += frameMs;
+            s_gpuMsSum += g_gpuFrameProfiler.value.load();
+            s_gpuWaitMsSum += g_frameFenceProfiler.value.load() + g_swapChainAcquireProfiler.value.load();
+            s_frameCount++;
+        }
+
+        if (now - s_windowStart < seconds(1))
+            return;
+
+        if (s_frameCount != 0)
+        {
+            double targetMs = 1000.0 / ((Config::FPS >= FPS_MIN && Config::FPS < FPS_MAX) ? Config::FPS : 60);
+            double averageFrameMs = s_frameMsSum / s_frameCount;
+            double averageGpuMs = s_gpuMsSum / s_frameCount;
+            double averageGpuWaitMs = s_gpuWaitMsSum / s_frameCount;
+
+            // Missing the target frame rate, with the GPU as the bottleneck. GPU time alone doesn't tell, as iOS
+            // lowers the GPU clock when the CPU holds it back, so also check that the CPU is waiting on the GPU.
+            bool isSlow = averageFrameMs > targetMs * 1.05 && averageGpuMs > targetMs * 0.85 && averageGpuWaitMs > 1.0;
+
+            // Hitting the target with GPU time to spare. Screens with next to no GPU work, like menus
+            // and loading screens, say nothing about how stages would do, so they don't count.
+            bool isFast = averageFrameMs <= targetMs * 1.05 && averageGpuMs > 4.0 && averageGpuMs < targetMs * 0.6;
+
+            s_slowSeconds = isSlow ? s_slowSeconds + 1 : 0;
+            s_fastSeconds = isFast ? s_fastSeconds + 1 : 0;
+
+            bool canChange = (now - s_lastChange) >= seconds(3);
+
+            if (canChange && s_slowSeconds >= SLOW_SECONDS_BEFORE_LOWERING && factor > MIN_FACTOR)
+            {
+                // Aim for the GPU time to fit in the frame with some room, assuming it scales with the pixel count.
+                float step = std::clamp(float(std::sqrt(targetMs * 0.8 / averageGpuMs)), 0.6f, 0.95f);
+                factor = std::max(MIN_FACTOR, std::floor(factor * step / FACTOR_STEP + 0.001f) * FACTOR_STEP);
+
+                // Falling behind right after raising the resolution means there wasn't room for it. Wait
+                // longer before trying again, so that the resolution doesn't keep going back and forth.
+                if ((now - s_lastRaise) < seconds(15))
+                    s_fastSecondsBeforeRaising = std::min(s_fastSecondsBeforeRaising * 2, MAX_FAST_SECONDS_BEFORE_RAISING);
+            }
+            else if (canChange && s_fastSeconds >= s_fastSecondsBeforeRaising && factor < 1.0f)
+            {
+                float step = std::clamp(float(std::sqrt(targetMs * 0.7 / averageGpuMs)), 1.05f, 1.2f);
+                factor = std::min(1.0f, std::ceil(factor * step / FACTOR_STEP - 0.001f) * FACTOR_STEP);
+                s_lastRaise = now;
+            }
+        }
+
+        s_windowStart = now;
+        s_frameMsSum = 0.0;
+        s_gpuMsSum = 0.0;
+        s_gpuWaitMsSum = 0.0;
+        s_frameCount = 0;
+    }
+
+    if (factor != previousFactor)
+    {
+        LOGFN("Dynamic resolution: {:.0f}% to {:.0f}% of the resolution scale option.", previousFactor * 100.0f, factor * 100.0f);
+
+        g_dynamicResolutionFactor.store(factor, std::memory_order_relaxed);
+        g_needsResize = true;
+        s_lastChange = now;
+        s_slowSeconds = 0;
+        s_fastSeconds = 0;
+    }
+#endif
+}
 
 #if !defined(UNLEASHED_RECOMP_D3D12) && !defined(UNLEASHED_RECOMP_METAL)
 static constexpr Backend g_backend = Backend::VULKAN;
@@ -2050,7 +2180,14 @@ bool Video::CreateHostDevice(const char *sdlVideoDriver, bool graphicsApiRetry)
             bufferCount = 3;
             break;
         case Backend::METAL:
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+            // iOS limits the layer to exactly this many drawables. With two, the GPU sits idle every frame until the
+            // screen gives one back, and iOS then lowers the CPU and GPU clocks as they look underused, which
+            // roughly halves the frame rate.
+            bufferCount = 3;
+#else
             bufferCount = 2;
+#endif
             break;
         }
 
@@ -3058,12 +3195,32 @@ void Video::HandleApplicationBackgroundState(bool isBackgrounded)
         LOGFN("Application {} the background.", isBackgrounded ? "entered" : "left");
 }
 
-// iOS doesn't allow GPU work in the background, so stop presenting new frames until the app is back.
-static void WaitWhileApplicationSuspended()
+// Whether a frame can be presented right now.
+static bool CanPresent()
 {
-    while (g_appSuspended.load(std::memory_order_acquire))
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    // iOS only displays the game, and gives back the drawables it renders into, while the app is active. Getting the
+    // next drawable otherwise blocks the main thread, which is also the thread that has to handle the system's
+    // messages that make the app active again, which left the game stuck after Notification Center, screenshots
+    // or the app switcher.
+    if (std::this_thread::get_id() == g_eventThreadId)
+        return ios_scene::IsApplicationActive();
+#endif
+
+    // iOS doesn't allow GPU work in the background.
+    return !g_appSuspended.load(std::memory_order_acquire);
+}
+
+// Holds off presenting until the app can show frames again, while letting the main thread handle system events.
+static void WaitUntilPresentable()
+{
+    if (CanPresent())
+        return;
+
+    LOGN("Rendering paused while the application is inactive.");
+
+    do
     {
-        // The event telling us the app is back arrives on the main thread, so it has to keep pumping events.
         if (std::this_thread::get_id() == g_eventThreadId)
         {
             SDL_PumpEvents();
@@ -3072,6 +3229,9 @@ static void WaitWhileApplicationSuspended()
 
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
+    while (!CanPresent());
+
+    LOGN("Rendering resumed.");
 }
 
 void Video::WaitOnSwapChain()
@@ -3100,8 +3260,6 @@ void Video::Present()
 
     if (logPresent)
         LOGFN("Video::Present begin - index: {}, frame: {}, swapChainValid: {}", presentLogIndex, g_frame, g_swapChainValid);
-
-    WaitWhileApplicationSuspended();
 
     g_readyForCommands = false;
 
@@ -3199,6 +3357,8 @@ void Video::Present()
     }
 
     g_presentProfiler.Reset();
+
+    UpdateDynamicResolution();
 
     if (logPresent)
         LOGFN("Video::Present end - index: {}, frame: {}, swapChainValid: {}", presentLogIndex, g_frame, g_swapChainValid);
@@ -5576,7 +5736,7 @@ static void ProcSetPixelShader(const RenderCommand& cmd)
             {
                 if (g_aspectRatio >= WIDE_ASPECT_RATIO)
                 {
-                    size_t height = round(Video::s_viewportHeight * Config::ResolutionScale);
+                    size_t height = round(Video::s_viewportHeight * GetResolutionScale());
 
                     if (height > 1440)
                         shaderIndex = GAUSSIAN_BLUR_9X9;
@@ -5590,7 +5750,7 @@ static void ProcSetPixelShader(const RenderCommand& cmd)
                 else
                 {
                     // Narrow aspect ratios should check for width to account for VERT+.
-                    size_t width = round(Video::s_viewportWidth * Config::ResolutionScale);
+                    size_t width = round(Video::s_viewportWidth * GetResolutionScale());
 
                     if (width > 2560)
                         shaderIndex = GAUSSIAN_BLUR_9X9;
@@ -6496,8 +6656,8 @@ static void SetResolution(be<uint32_t>* device)
 {
     Video::ComputeViewportDimensions();
 
-    uint32_t width = uint32_t(round(Video::s_viewportWidth * Config::ResolutionScale));
-    uint32_t height = uint32_t(round(Video::s_viewportHeight * Config::ResolutionScale));
+    uint32_t width = uint32_t(round(Video::s_viewportWidth * GetResolutionScale()));
+    uint32_t height = uint32_t(round(Video::s_viewportHeight * GetResolutionScale()));
     device[46] = width == 0 ? 880 : width;
     device[47] = height == 0 ? 720 : height;
 }
@@ -7919,6 +8079,7 @@ static void PipelineTaskConsumerThread()
                         createGraphicsPipeline(pipelineState, "Precompiled CSD Filter Pipeline");
                     }
                 }
+
 
                 type = PipelineTaskType::Null;
                 --g_pendingPipelineTaskCount;

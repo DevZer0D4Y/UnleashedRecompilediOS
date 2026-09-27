@@ -231,6 +231,12 @@ void GameWindow::Init(const char* sdlVideoDriver)
     if (!IsPositionValid())
         GameWindow::ResetDimensions();
 
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    // The game only supports landscape. The window is resizable, so SDL would otherwise let iOS use portrait too, and
+    // flip its view to portrait whenever the system UI is portrait, like Notification Center or the app switcher.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
+
     s_pWindow = SDL_CreateWindow("Unleashed Recompiled", s_x, s_y, s_width, s_height, GetWindowFlags());
     if (s_pWindow == nullptr)
     {

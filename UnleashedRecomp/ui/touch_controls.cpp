@@ -534,6 +534,17 @@ static void OnGameplayFingerDown(TouchCapture& capture, ImVec2 point)
     }
 }
 
+// Call with g_mutex held.
+static void UpdateWindowSize()
+{
+    int windowWidth = 0;
+    int windowHeight = 0;
+    SDL_GetWindowSize(GameWindow::s_pWindow, &windowWidth, &windowHeight);
+
+    if (windowWidth > 0 && windowHeight > 0)
+        g_windowSize = { float(windowWidth), float(windowHeight) };
+}
+
 static int TouchControls_OnSDLEvent(void*, SDL_Event* event)
 {
     if (event->type != SDL_FINGERDOWN && event->type != SDL_FINGERMOTION && event->type != SDL_FINGERUP)
@@ -547,12 +558,7 @@ static int TouchControls_OnSDLEvent(void*, SDL_Event* event)
         return 0;
     }
 
-    int windowWidth = 0;
-    int windowHeight = 0;
-    SDL_GetWindowSize(GameWindow::s_pWindow, &windowWidth, &windowHeight);
-
-    if (windowWidth > 0 && windowHeight > 0)
-        g_windowSize = { float(windowWidth), float(windowHeight) };
+    UpdateWindowSize();
 
     ImVec2 point = { event->tfinger.x * g_windowSize.x, event->tfinger.y * g_windowSize.y };
     auto capture = std::find_if(g_captures.begin(), g_captures.end(), [&](const TouchCapture& c) { return c.fingerId == event->tfinger.fingerId; });
@@ -752,6 +758,10 @@ void TouchControls::Draw(float swapChainWidth, float swapChainHeight, float view
         return;
 
     std::lock_guard lock(g_mutex);
+
+    // Don't wait for the first touch to learn the window size. Until then, the controls would be scaled
+    // for a 1x1 window, and their outlines would be thousands of pixels thick, covering the game in white.
+    UpdateWindowSize();
 
     auto drawList = ImGui::GetBackgroundDrawList();
     float scale = swapChainWidth / g_windowSize.x;

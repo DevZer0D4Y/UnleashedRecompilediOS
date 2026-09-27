@@ -7,6 +7,9 @@ namespace ios_scene
     // Runs the main run loop until the app's scene has connected. Call at startup, before creating any windows.
     void WaitForScene();
 
+    // Whether iOS considers the app active, meaning it's in the foreground with nothing covering it. Call from the main thread.
+    bool IsApplicationActive();
+
     // Commits pending UIKit changes to the screen. The game's loop only pumps events and never lets
     // the run loop idle, which is normally when UIKit does this. Call from the main thread.
     void FlushDisplayChanges();
