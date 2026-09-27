@@ -6,7 +6,7 @@
 # The folder must contain the base game's default.xex and shader.ar, and the title update's default.xexp,
 # anywhere inside it. Optional environment variables:
 #   TEAM_ID=XXXXXXXXXX     Apple development team, detected from your signing certificate if not set.
-#   BUNDLE_ID=com.x.y      Bundle identifier, derived from the team if not set.
+#   BUNDLE_ID=com.x.y      Bundle identifier, com.devz.sonicunleashed if not set.
 #   EXTENDED_MEMORY=OFF    Build without the extended memory entitlements if your account can't sign them.
 
 set -euo pipefail
@@ -153,7 +153,7 @@ if [[ -z "${TEAM_ID:-}" ]]; then
         | sed -n 's/.*OU *= *\([A-Z0-9]\{10\}\).*/\1/p' | head -n 1 || true)"
 fi
 [[ -n "$TEAM_ID" ]] || fail "No Apple Development certificate found. Open Xcode > Settings > Accounts, sign in with your Apple ID, click Manage Certificates and add an Apple Development certificate. Then run this again, or pass TEAM_ID=XXXXXXXXXX."
-BUNDLE_ID="${BUNDLE_ID:-com.$(echo "$TEAM_ID" | tr '[:upper:]' '[:lower:]').unleashedrecomp}"
+BUNDLE_ID="${BUNDLE_ID:-com.devz.sonicunleashed}"
 echo "  Team:      $TEAM_ID"
 echo "  Bundle ID: $BUNDLE_ID"
 

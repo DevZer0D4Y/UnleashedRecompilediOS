@@ -135,6 +135,11 @@ static void AttachToScene(UIWindow* window)
 
 namespace ios_scene
 {
+    bool IsApplicationActive()
+    {
+        return UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
+    }
+
     void FlushDisplayChanges()
     {
         [CATransaction flush];
