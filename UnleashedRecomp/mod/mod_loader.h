@@ -10,5 +10,15 @@ struct ModLoader
 
     static std::vector<std::filesystem::path>* GetIncludeDirectories(size_t modIndex);
 
+    struct Code
+    {
+        std::string name;
+        bool enabled;
+    };
+
+    // Only codes implemented in this executable are available on iOS.
+    static std::vector<Code> GetBuiltInCodes();
+    static void SaveBuiltInCodes(const std::vector<Code>& codes);
+
     static void Init();
 };
