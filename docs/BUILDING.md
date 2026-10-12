@@ -123,6 +123,19 @@ On a Mac with Xcode and your Apple ID added in Xcode > Settings > Accounts, run:
 ```
 The folder can hold extracted game folders, a disc image of the game, or raw Xbox 360 packages (title update, DLC or Games on Demand). Packages and disc images are unpacked into `./out/game_files/`, ready to copy to your iPhone. The script finds `default.xex`, `default.xexp` and `shader.ar` and copies them into `./UnleashedRecompLib/private/`. It then generates the recompiled code and shaders with a macOS build, compiles the Metal shaders for iOS, and builds, signs and exports the IPA to `./out/ipa/`. It detects your development team from your signing certificate. Set `TEAM_ID`, `BUNDLE_ID` or `EXTENDED_MEMORY=OFF` in the environment to override the defaults.
 
+The host shader compiler must target `iphoneos` when generating the game shader cache for iOS. `build_ios.sh` selects this automatically. When generating manually, configure the host build with `-DUNLEASHED_RECOMP_METAL_SHADER_SDK=iphoneos` before generating the shaders. The iOS dependency triplet targets iOS 15 as well.
+
+For an already compiled app from the `ios-release` Ninja preset, package an IPA for re-signing with a sideloading tool:
+
+```sh
+python3 tools/package_ios_ipa.py \
+  "out/build/ios-release/UnleashedRecomp/Unleashed Recompiled.app" \
+  "out/ipa/SonicUnleashed_iOS.ipa" \
+  --entitlements UnleashedRecomp/res/ios/UnleashedRecomp.entitlements
+```
+
+This compiles the asset catalog, adds the iPhone/iPad installation metadata, and checks an ad-hoc signature. The resulting IPA needs re-signing before installation; it does not include an Apple provisioning profile or runtime game assets. Packaging stages its files beside the output IPA, so an output path on an APFS build volume keeps these files off the internal disk.
+
 ### iOS (experimental)
 1. Configure the project with the iOS preset.
 ```bash
