@@ -40,7 +40,7 @@ git submodule update --init --recursive
 
 # The macOS build provides the tools used below: the package extractor and the recompilers.
 step "Configuring the macOS tools build"
-cmake --preset "$MAC_PRESET"
+cmake --preset "$MAC_PRESET" -DUNLEASHED_RECOMP_METAL_SHADER_SDK=iphoneos
 
 step "Unpacking Xbox 360 packages in $GAME_DIR"
 # Title updates, DLC and Games on Demand copies often come as raw STFS packages (files starting with CON, LIVE or PIRS)
@@ -185,8 +185,8 @@ for embedded in "$REPO"/UnleashedRecomp/gpu/shader/msl/*.metallib.c; do
     name="$(basename "$source" .metal)"
     ir="$source.ios.ir"
 
-    if ! xcrun -sdk iphoneos metal -mios-version-min=15.0 -o "$ir" -c "$source" -D__air__ -frecord-sources -gline-tables-only 2>/dev/null; then
-        xcrun -sdk iphoneos metal -o "$ir" -c "$source" -D__air__ -frecord-sources -gline-tables-only
+    if ! xcrun -sdk iphoneos metal -mios-version-min=15.0 -fmodules-cache-path="$MAC_BUILD/metal-module-cache" -o "$ir" -c "$source" -D__air__ -frecord-sources -gline-tables-only 2>/dev/null; then
+        xcrun -sdk iphoneos metal -fmodules-cache-path="$MAC_BUILD/metal-module-cache" -o "$ir" -c "$source" -D__air__ -frecord-sources -gline-tables-only
     fi
 
     xcrun -sdk iphoneos metallib -o "$metallib" "$ir"
