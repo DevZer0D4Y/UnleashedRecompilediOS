@@ -1,5 +1,6 @@
 #include "mod_loader.h"
 #include "ini_file.h"
+#include "ios_mod_manager.h"
 
 #include <api/Hedgehog/Base/System/hhAllocator.h>
 #include <cpu/guest_stack_var.h>
@@ -91,19 +92,65 @@ std::vector<std::filesystem::path>* ModLoader::GetIncludeDirectories(size_t modI
     return modIndex < g_mods.size() ? &g_mods[modIndex].includeDirs : nullptr;
 }
 
+std::vector<ModLoader::Code> ModLoader::GetBuiltInCodes()
+{
+    std::vector<Code> codes;
+    for (auto* definition : g_configDefinitions)
+    {
+        if (definition->GetSection() != "Codes")
+            continue;
+        if (auto* code = dynamic_cast<ConfigDef<bool, true>*>(definition))
+            codes.push_back({ std::string(code->GetName()), code->Value });
+    }
+    return codes;
+}
+
+void ModLoader::SaveBuiltInCodes(const std::vector<Code>& codes)
+{
+    for (auto* definition : g_configDefinitions)
+    {
+        if (definition->GetSection() != "Codes")
+            continue;
+        auto* codeDefinition = dynamic_cast<ConfigDef<bool, true>*>(definition);
+        if (!codeDefinition)
+            continue;
+        for (const auto& code : codes)
+            if (codeDefinition->GetName() == code.name)
+            {
+                codeDefinition->Value = code.enabled;
+                // Hidden codes are only written by Config::Save when explicitly
+                // selected; preserve disabled selections as well as enabled ones.
+                codeDefinition->IsLoadedFromConfig = true;
+                break;
+            }
+    }
+    Config::Save();
+}
+
 void ModLoader::Init()
 {
     const std::filesystem::path& userPath = GetUserPath();
 
+    std::filesystem::path configPath = userPath / "cpkredir.ini";
     IniFile configIni;
-    if (!configIni.read(userPath / "cpkredir.ini"))
+    if (!configIni.read(configPath))
     {
         configIni = {};
 
-        if (!configIni.read(GetGamePath() / "cpkredir.ini"))
+        configPath = GetGamePath() / "cpkredir.ini";
+        if (!configIni.read(configPath))
+        {
+#ifndef UNLEASHED_RECOMP_IOS
             return;
+#endif
+        }
     }
 
+#ifdef UNLEASHED_RECOMP_IOS
+    // The native manager owns the iOS selection. Desktop paths/settings may
+    // refer to a different machine and must not override the native controls.
+    configIni = {};
+#endif
     if (!configIni.getBool("CPKREDIR", "Enabled", true))
         return;
 
@@ -125,11 +172,19 @@ void ModLoader::Init()
     }
 
     std::string modsDbIniFilePathU8 = configIni.getString("CPKREDIR", "ModsDbIni", "");
+    std::filesystem::path modsDbPath;
+#ifdef UNLEASHED_RECOMP_IOS
+    modsDbPath = ios_mod_manager::DatabasePath(userPath);
+#else
     if (modsDbIniFilePathU8.empty())
         return;
-
+    std::replace(modsDbIniFilePathU8.begin(), modsDbIniFilePathU8.end(), '\\', '/');
+    modsDbPath = std::u8string_view((const char8_t*)modsDbIniFilePathU8.c_str());
+    if (modsDbPath.is_relative())
+        modsDbPath = configPath.parent_path() / modsDbPath;
+#endif
     IniFile modsDbIni;
-    if (!modsDbIni.read(std::u8string_view((const char8_t*)modsDbIniFilePathU8.c_str())))
+    if (!modsDbIni.read(modsDbPath))
         return;
 
     bool foundModSaveFilePath = false;
@@ -147,6 +202,16 @@ void ModLoader::Init()
 
         std::filesystem::path modIniFilePath(std::u8string_view((const char8_t*)modIniFilePathU8.c_str()));
 
+#ifdef UNLEASHED_RECOMP_IOS
+        modIniFilePath = ios_mod_manager::ResolveRelative(userPath, modIniFilePathU8);
+        if (modIniFilePath.empty() || !ios_mod_manager::CompatibilityIssue(modIniFilePath).empty())
+            continue;
+#else
+        std::replace(modIniFilePathU8.begin(), modIniFilePathU8.end(), '\\', '/');
+        modIniFilePath = std::u8string_view((const char8_t*)modIniFilePathU8.c_str());
+        if (modIniFilePath.is_relative())
+            modIniFilePath = modsDbPath.parent_path() / modIniFilePath;
+#endif
         IniFile modIni;
         if (!modIni.read(modIniFilePath))
             continue;

@@ -27,6 +27,9 @@
 #include <ui/game_window.h>
 #include <ui/installer_wizard.h>
 #include <mod/mod_loader.h>
+#ifdef UNLEASHED_RECOMP_IOS
+#include <ui/ios_mod_manager.h>
+#endif
 #include <preload_executable.h>
 #include <SDL.h>
 
@@ -452,6 +455,16 @@ int main(int argc, char *argv[])
         }
     }
 
+#ifdef UNLEASHED_RECOMP_IOS
+    // UIKit needs the SDL window before presenting the startup mod manager.
+    if (!runInstallerWizard && !Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
+    {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
+        std::_Exit(1);
+    }
+    if (!ios_mod_ui::Run())
+        LOGN_ERROR("Could not present the iOS mod manager.");
+#endif
     ModLoader::Init();
 
     if (!PersistentStorageManager::LoadBinary())
@@ -468,6 +481,7 @@ int main(int argc, char *argv[])
         std::_Exit(1);
     }
 
+#ifndef UNLEASHED_RECOMP_IOS
     if (!runInstallerWizard)
     {
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
@@ -477,6 +491,7 @@ int main(int argc, char *argv[])
         }
     }
 
+#endif
     Video::StartPipelinePrecompilation();
 
     LOGFN("Starting guest thread at entry: 0x{:08X}", entry);

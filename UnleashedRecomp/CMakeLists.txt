@@ -205,7 +205,7 @@ set(UNLEASHED_RECOMP_UI_CXX_SOURCES
 )
 
 if (UNLEASHED_RECOMP_IOS)
-    list(APPEND UNLEASHED_RECOMP_UI_CXX_SOURCES "ui/ios_file_picker.mm")
+    list(APPEND UNLEASHED_RECOMP_UI_CXX_SOURCES "ui/ios_file_picker.mm" "ui/ios_mod_manager.mm")
     list(APPEND UNLEASHED_RECOMP_UI_CXX_SOURCES "ui/ios_scene.mm")
     list(APPEND UNLEASHED_RECOMP_UI_CXX_SOURCES "ui/touch_haptics_ios.mm")
 endif()
@@ -237,6 +237,7 @@ set(UNLEASHED_RECOMP_USER_CXX_SOURCES
 
 set(UNLEASHED_RECOMP_MOD_CXX_SOURCES
     "mod/mod_loader.cpp"
+    "mod/ios_mod_manager.cpp"
 )
 
 set(UNLEASHED_RECOMP_THIRDPARTY_SOURCES
@@ -515,6 +516,10 @@ if (WIN32)
         winmm
         windowsapp
     )
+endif()
+
+if (UNLEASHED_RECOMP_IOS)
+    target_link_libraries(UnleashedRecomp PRIVATE "-framework UIKit" "-framework UniformTypeIdentifiers")
 endif()
 
 target_link_libraries(UnleashedRecomp PRIVATE
